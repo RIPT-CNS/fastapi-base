@@ -1,0 +1,6 @@
+docker/
+.venv/*
+.idea/*
+docker-compose.yml
+Dockerfile
+mount-data/

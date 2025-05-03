@@ -1,0 +1,41 @@
+x-common: &common
+  restart: always
+  env_file:
+    - .env
+
+services:
+  db:
+    image: postgres:16
+    <<: *common
+    volumes:
+      - ./mount-data/db:/var/lib/postgresql/data
+    ports:
+      - 5555:5432
+
+  alembic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    <<: *common
+    command: [ "alembic", "upgrade", "head" ]
+    restart: "no"
+    depends_on:
+      - db
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    <<: *common
+    ports:
+      - 8000:8000
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./alembic:/app/alembic
+      - ./requirements.txt:/app/requirements.txt
+      - ./.env:/app/.env
+    command: ["/app/entrypoint.sh"]
+    depends_on:
+      - db
+      - alembic
