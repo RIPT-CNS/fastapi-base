@@ -18,6 +18,8 @@ from app.schemas.sche_user import (
 )
 from app.schemas.sche_user import UserItemResponse
 from app.helpers.exception_handler import CustomException, ExceptionType
+from app.core.config import keycloak_openid
+from app.helpers.enums import AuthMethod
 
 
 class UserService(object):
@@ -42,27 +44,49 @@ class UserService(object):
         return user
 
     @staticmethod
+    def authenticate_keycloak(*, username: str, password: str) -> Optional[User]:
+        try:
+            token = keycloak_openid.token(username, password)
+            return token["access_token"]
+        except Exception:
+            return None
+
+    @staticmethod
     def get_current_user(
         http_authorization_credentials=Depends(reusable_oauth2),
     ) -> User:
-        """
-        Decode JWT token to get user_id => return User info from DB query
-        """
         try:
             if http_authorization_credentials is None:
                 raise CustomException(exception=ExceptionType.UNAUTHORIZED)
             if not http_authorization_credentials.credentials:
                 raise CustomException(exception=ExceptionType.UNAUTHORIZED)
-            payload = jwt.decode(
-                http_authorization_credentials.credentials,
-                settings.SECRET_KEY,
-                algorithms=[settings.SECURITY_ALGORITHM],
-            )
-            token_data = TokenPayload(**payload)
-        except (jwt.PyJWTError, ValidationError):
-            raise CustomException(exception=ExceptionType.UNAUTHORIZED)
-        user = db.session.query(User).get(token_data.user_id)
-        if not user:
+            try:
+                user_info = keycloak_openid.userinfo(
+                    http_authorization_credentials.credentials
+                )
+                print("============ KEYCLOAK USER ============", user_info)
+                if not user_info:
+                    raise
+                return User(
+                    username=user_info["preferred_username"],
+                    email=user_info.get("email"),
+                    full_name=user_info.get("name"),
+                )
+            except:
+                try:
+                    print("============ BASIC USER ============")
+                    payload = jwt.decode(
+                        http_authorization_credentials.credentials,
+                        settings.SECRET_KEY,
+                        algorithms=[settings.SECURITY_ALGORITHM],
+                    )
+                    token_data = TokenPayload(**payload)
+                    user = db.session.query(User).get(token_data.user_id)
+                    if not user:
+                        raise CustomException(exception=ExceptionType.UNAUTHORIZED)
+                except:
+                    raise CustomException(exception=ExceptionType.UNAUTHORIZED)
+        except Exception as e:
             raise CustomException(exception=ExceptionType.UNAUTHORIZED)
         return user
 

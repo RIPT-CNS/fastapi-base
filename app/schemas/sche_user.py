@@ -11,6 +11,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class LoginKeycloakRequest(BaseModel):
+    username: str
+    password: str
+
+
 class UserBase(BaseModel):
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None

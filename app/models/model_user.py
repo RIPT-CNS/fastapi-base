@@ -4,6 +4,7 @@ from app.models.model_base import BareBaseModel
 
 
 class User(BareBaseModel):
+    username = Column(String, index=True)
     full_name = Column(String, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String(255))

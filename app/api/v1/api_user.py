@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from fastapi_sqlalchemy import db
 
 from app.helpers.exception_handler import CustomException
-from app.helpers.login_manager import login_required, PermissionRequired
+from app.helpers.login_manager import PermissionRequired, AuthenticateRequired
 from app.helpers.paging import Page, PaginationParams, paginate
 from app.schemas.sche_base import DataResponse
 from app.schemas.sche_user import (
@@ -22,7 +22,9 @@ router = APIRouter()
 
 
 @router.get(
-    "", dependencies=[Depends(login_required)], response_model=Page[UserItemResponse]
+    "",
+    dependencies=[Depends(AuthenticateRequired())],
+    response_model=Page[UserItemResponse],
 )
 def get(params: PaginationParams = Depends()) -> Any:
     """
@@ -54,22 +56,26 @@ def create(user_data: UserCreateRequest, user_service: UserService = Depends()) 
 
 @router.get(
     "/me",
-    dependencies=[Depends(login_required)],
+    dependencies=[Depends(AuthenticateRequired())],
     response_model=DataResponse[UserItemResponse],
 )
-def detail_me(current_user: User = Depends(UserService.get_current_user)) -> DataResponse[UserItemResponse]:
+def detail_me(
+    current_user: User = Depends(UserService.get_current_user),
+) -> DataResponse[UserItemResponse]:
     """
     API get detail current User
     """
     try:
-        return DataResponse(http_code=200, data=UserItemResponse.model_validate(current_user))
+        return DataResponse(
+            http_code=200, data=UserItemResponse.model_validate(current_user)
+        )
     except Exception as e:
         raise CustomException(exception=e)
 
 
 @router.put(
     "/me",
-    dependencies=[Depends(login_required)],
+    dependencies=[Depends(AuthenticateRequired())],
     response_model=DataResponse[UserItemResponse],
 )
 def update_me(
@@ -89,7 +95,7 @@ def update_me(
 
 @router.get(
     "/{user_id}",
-    dependencies=[Depends(login_required)],
+    dependencies=[Depends(AuthenticateRequired())],
     response_model=DataResponse[UserItemResponse],
 )
 def detail(user_id: int, user_service: UserService = Depends()) -> Any:

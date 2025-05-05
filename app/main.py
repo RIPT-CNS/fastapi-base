@@ -36,6 +36,10 @@ def get_application() -> FastAPI:
             - Dockerize
         """,
         debug=settings.DEBUG,
+        swagger_ui_init_oauth={
+            "clientId": settings.KEYCLOAK_CLIENT_ID,
+            "scopes": {"openid": "OpenID Connect scope"},
+        },
     )
     application.add_middleware(
         CORSMiddleware,

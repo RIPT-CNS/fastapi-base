@@ -9,7 +9,7 @@ from app.schemas.sche_base import DataResponse
 from app.schemas.sche_token import Token
 from app.services.srv_user import UserService
 from app.helpers.exception_handler import CustomException
-from app.schemas.sche_user import UserItemResponse, UserRegisterRequest, LoginRequest
+from app.schemas.sche_user import UserItemResponse, UserRegisterRequest, LoginRequest, LoginKeycloakRequest
 from app.helpers.exception_handler import ExceptionType
 
 router = APIRouter()
@@ -31,6 +31,21 @@ def login_access_token(form_data: LoginRequest, user_service: UserService = Depe
         access_token = create_access_token(user_id=user.id)
 
         return DataResponse(http_code=200, data={"access_token": access_token})
+    except Exception as e:
+        print(e, flush=True)
+        raise CustomException(exception=e)
+
+
+@router.post("/login-keycloak", response_model=DataResponse[Token])
+def login_access_token(form_data: LoginKeycloakRequest, user_service: UserService = Depends()):
+    try:
+        token = user_service.authenticate_keycloak(
+            username=form_data.username, password=form_data.password
+        )
+        if not token:
+            raise CustomException(exception=ExceptionType.BAD_REQUEST_DATA_MISMATCH)
+
+        return DataResponse(http_code=200, data={"access_token": token})
     except Exception as e:
         raise CustomException(exception=e)
 
