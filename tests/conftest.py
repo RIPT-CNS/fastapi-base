@@ -13,16 +13,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.db.base import get_db
 from fastapi_sqlalchemy import DBSessionMiddleware
-from dotenv import load_dotenv
 
-load_dotenv(verbose=True)
-
-SQL_DATABASE_URL = os.getenv("SQL_DATABASE_URL", "/tests")
-print("SQL_DATABASE_URL", SQL_DATABASE_URL)
+DATABASE_URL = f"postgresql+psycopg2://{os.environ.get('POSTGRES_USER')}:{os.environ.get('POSTGRES_PASSWORD')}@{os.environ.get('POSTGRES_HOST')}:{os.environ.get('POSTGRES_PORT')}/{os.environ.get('POSTGRES_DB')}"
+print("DATABASE_URL", DATABASE_URL)
 connect_args = {}
-if SQL_DATABASE_URL[:6] == "sqlite":
+if DATABASE_URL[:6] == "sqlite":
     connect_args["check_same_thread"] = False
-engine = create_engine(SQL_DATABASE_URL, connect_args=connect_args)
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -212,7 +209,7 @@ def app() -> Generator[FastAPI, Any, None]:
     """
     Base.metadata.create_all(engine)  # Create the tables.
     _app = get_application()
-    _app.add_middleware(DBSessionMiddleware, db_url=SQL_DATABASE_URL)
+    _app.add_middleware(DBSessionMiddleware, db_url=DATABASE_URL)
     yield _app
     Base.metadata.drop_all(engine)
 

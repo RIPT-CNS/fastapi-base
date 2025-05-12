@@ -9,13 +9,15 @@ from sqlalchemy import pool
 from alembic import context
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
 sys.path.append(BASE_DIR)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
-config.set_main_option("sqlalchemy.url", os.environ["SQL_DATABASE_URL"])
+config.set_main_option(
+    "sqlalchemy.url",
+    f"postgresql+psycopg2://{os.environ.get('POSTGRES_USER')}:{os.environ.get('POSTGRES_PASSWORD')}@{os.environ.get('POSTGRES_HOST')}:{os.environ.get('POSTGRES_PORT')}/{os.environ.get('POSTGRES_DB')}",
+)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -48,7 +50,10 @@ def run_migrations_offline():
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url", os.environ["SQL_DATABASE_URL"])
+    url = config.get_main_option(
+        "sqlalchemy.url",
+        f"postgresql+psycopg2://{os.environ.get('POSTGRES_USER')}:{os.environ.get('POSTGRES_PASSWORD')}@{os.environ.get('POSTGRES_HOST')}:{os.environ.get('POSTGRES_PORT')}/{os.environ.get('POSTGRES_DB')}",
+    )
     context.configure(
         url=url,
         target_metadata=target_metadata,
