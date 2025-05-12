@@ -18,32 +18,32 @@
 ## Cấu trúc project
 
 ```txt
-.  
-├── alembic  
-│   ├── versions    // thư mục chứa file migrations  
-│   └── env.py  
-├── app  
-│   ├── api         // các file api được đặt trong này  
-│   ├── core        // chứa file config load các biến env & function tạo/verify JWT access-token  
-│   ├── db          // file cấu hình make DB session  
-│   ├── helpers     // các function hỗ trợ như login_manager, paging  
-│   ├── models      // Database model, tích hợp với alembic để auto generate migration  
-│   ├── schemas     // Pydantic Schema  
-│   ├── services    // Chứa logic CRUD giao tiếp với DB  
-│   └── main.py     // cấu hình chính của toàn bộ project  
-├── tests  
-│   ├── api         // chứa các file test cho từng api  
-│   ├── faker       // chứa file cấu hình faker để tái sử dụng  
-│   ├── .env        // config DB test  
-│   └── conftest.py // cấu hình chung của pytest  
-├── .gitignore  
-├── alembic.ini  
-├── docker-compose.yml  
-├── Dockerfile  
-├── .env.example  
-├── logging.ini     // cấu hình logging  
-├── pytest.ini      // file setup cho pytest  
-├── README.md  
+.dd
+├── alembicdd
+│   ├── versions    // thư mục chứa file migrationsdd
+│   └── env.pydd
+├── appdd
+│   ├── api         // các file api được đặt trong nàydd
+│   ├── core        // chứa file config load các biến env & function tạo/verify JWT access-tokendd
+│   ├── db          // file cấu hình make DB sessiondd
+│   ├── helpers     // các function hỗ trợ như login_manager, pagingdd
+│   ├── models      // Database model, tích hợp với alembic để auto generate migrationdd
+│   ├── schemas     // Pydantic Schemadd
+│   ├── services    // Chứa logic CRUD giao tiếp với DBdd
+│   └── main.py     // cấu hình chính của toàn bộ projectdd
+├── testsdd
+│   ├── api         // chứa các file test cho từng apidd
+│   ├── faker       // chứa file cấu hình faker để tái sử dụngdd
+│   ├── .env        // config DB testdd
+│   └── conftest.py // cấu hình chung của pytestdd
+├── .gitignoredd
+├── alembic.inidd
+├── docker-compose.ymldd
+├── Dockerfiledd
+├── .env.exampledd
+├── logging.ini     // cấu hình loggingdd
+├── pytest.ini      // file setup cho pytestdd
+├── README.mddd
 └── requirements.txt    // file chứa các thư viện để cài đặt qua pip install
 ```
 
