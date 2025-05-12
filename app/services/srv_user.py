@@ -4,7 +4,6 @@ from typing import Optional
 from fastapi import Depends
 from fastapi.security import HTTPBearer
 from fastapi_sqlalchemy import db
-from pydantic import ValidationError
 
 from app.models import User
 from app.core.config import settings
@@ -19,7 +18,8 @@ from app.schemas.sche_user import (
 from app.schemas.sche_user import UserItemResponse
 from app.helpers.exception_handler import CustomException, ExceptionType
 from app.core.config import keycloak_openid
-from app.helpers.enums import AuthMethod
+from google.oauth2 import id_token
+from google.auth.transport import requests
 
 
 class UserService(object):
@@ -74,18 +74,33 @@ class UserService(object):
                 )
             except:
                 try:
-                    print("============ BASIC USER ============")
-                    payload = jwt.decode(
+                    user_info = id_token.verify_oauth2_token(
                         http_authorization_credentials.credentials,
-                        settings.SECRET_KEY,
-                        algorithms=[settings.SECURITY_ALGORITHM],
+                        requests.Request(),
+                        settings.GOOGLE_CLIENT_ID,
                     )
-                    token_data = TokenPayload(**payload)
-                    user = db.session.query(User).get(token_data.user_id)
-                    if not user:
-                        raise CustomException(exception=ExceptionType.UNAUTHORIZED)
+                    print("============ GOOGLE USER ============", user_info)
+                    if not user_info:
+                        raise
+                    return User(
+                        username=user_info["sub"],
+                        email=user_info.get("email"),
+                        full_name=user_info.get("name"),
+                    )
                 except:
-                    raise CustomException(exception=ExceptionType.UNAUTHORIZED)
+                    try:
+                        payload = jwt.decode(
+                            http_authorization_credentials.credentials,
+                            settings.SECRET_KEY,
+                            algorithms=[settings.SECURITY_ALGORITHM],
+                        )
+                        token_data = TokenPayload(**payload)
+                        user = db.session.query(User).get(token_data.user_id)
+                        print("============ BASIC USER ============")
+                        if not user:
+                            raise CustomException(exception=ExceptionType.UNAUTHORIZED)
+                    except:
+                        raise CustomException(exception=ExceptionType.UNAUTHORIZED)
         except Exception as e:
             raise CustomException(exception=ExceptionType.UNAUTHORIZED)
         return user
