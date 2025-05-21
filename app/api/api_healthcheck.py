@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 
-from app.schemas.sche_base import BaseResponse
+from app.schemas.sche_response import BaseResponse
 
-router = APIRouter()
+router = APIRouter(tags=["health-check"], prefix=f"/health-check")
 
 
 @router.get("", response_model=BaseResponse)

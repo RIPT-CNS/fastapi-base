@@ -1,64 +1,58 @@
-from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, EmailStr
 
-from app.helpers.enums import UserRole
+from app.utils.enums import UserRole
+from app.schemas.sche_base import BaseModelSchema
 
 
-class LoginRequest(BaseModel):
-    username: EmailStr
-    password: str
-
-
-class LoginKeycloakRequest(BaseModel):
-    username: str
-    password: str
-
-
-class UserBase(BaseModel):
+class UserBaseRequest(BaseModel):
+    password: Optional[str] = None
+    dob: Optional[float] = None
+    gender: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     full_name: Optional[str] = None
-    email: Optional[EmailStr] = None
-    is_active: Optional[bool] = True
-
-    model_config = {
-        "from_attributes": True,
-    }
-
-
-class UserItemResponse(UserBase):
-    id: int
-    full_name: str
-    email: EmailStr
-    is_active: bool
-    role: str
-    last_login: Optional[datetime]
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    identity_card: Optional[str] = None
+    identity_card_date: Optional[float] = None
+    identity_card_place: Optional[str] = None
 
 
-class UserCreateRequest(UserBase):
-    full_name: Optional[str]
-    password: str
-    email: EmailStr
-    is_active: bool = True
-    role: UserRole = UserRole.GUEST
-
-
-class UserRegisterRequest(BaseModel):
-    full_name: str
+class UserCreateRequest(UserBaseRequest):
+    username: Optional[str]
     email: EmailStr
     password: str
-    role: UserRole = UserRole.GUEST
-
-
-class UserUpdateMeRequest(BaseModel):
-    full_name: Optional[str]
-    email: Optional[EmailStr]
-    password: Optional[str]
-
-
-class UserUpdateRequest(BaseModel):
-    full_name: Optional[str]
-    email: Optional[EmailStr]
-    password: Optional[str]
     is_active: Optional[bool] = True
-    role: Optional[UserRole]
+    roles: List[str] = [
+        UserRole.GUEST,
+    ]
+
+
+class UserUpdateRequest(UserBaseRequest):
+    is_active: Optional[bool] = True
+    roles: Optional[List[str]] = None
+
+
+class UserUpdateMeRequest(UserBaseRequest):
+    pass
+
+
+class UserBaseResponse(BaseModelSchema):
+    sso_key: Optional[str] = None
+    username: Optional[str] = None
+    email: EmailStr
+    dob: Optional[float] = None
+    gender: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    identity_card: Optional[str] = None
+    identity_card_date: Optional[float] = None
+    identity_card_place: Optional[str] = None
+    is_active: Optional[bool] = None
+    last_login: Optional[float] = None
+    roles: List[str]
