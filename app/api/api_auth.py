@@ -7,7 +7,7 @@ from app.utils.exception_handler import CustomException, ExceptionType
 from app.schemas.sche_auth import LoginRequest, RegisterRequest, TokenResponse
 from app.schemas.sche_user import UserBaseResponse
 
-router = APIRouter(tags=["auth"], prefix=f"/auth")
+router = APIRouter(prefix=f"/auth")
 
 
 @router.post("/login", response_model=DataResponse[TokenResponse])
