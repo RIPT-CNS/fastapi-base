@@ -38,11 +38,11 @@ def get_all() -> Any:
 )
 def get_by_filter(
     sort_params: SortParams = Depends(),
-    filters_params: PaginationParams = Depends(),
+    pagination_params: PaginationParams = Depends(),
 ) -> Any:
     try:
         data, metadata = user_service.get_by_filter(
-            pagination_params=filters_params, sort_params=sort_params
+            pagination_params=pagination_params, sort_params=sort_params
         )
         return DataResponse(http_code=status.HTTP_200_OK, data=data, metadata=metadata)
     except Exception as e:
