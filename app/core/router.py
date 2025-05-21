@@ -7,8 +7,8 @@ import app.api as root_api
 
 router = APIRouter()
 
-router.include_router(api_healthcheck.router)
-router.include_router(api_auth.router)
+router.include_router(api_healthcheck.router, tags=["[Current] Health Check"])
+router.include_router(api_auth.router, tags=["[Current] Auth"])
 
 for finder, subpackage_name, is_pkg in pkgutil.iter_modules(root_api.__path__):
     if is_pkg and subpackage_name.startswith("v"):
@@ -18,5 +18,11 @@ for finder, subpackage_name, is_pkg in pkgutil.iter_modules(root_api.__path__):
             version_router = getattr(api_module, "router", None)
             if version_router:
                 if subpackage_name == settings.API_VERSION:
-                    router.include_router(version_router)
-                router.include_router(version_router, prefix=f"/{subpackage_name}")
+                    router.include_router(
+                        version_router, tags=[f"[Current] {subpackage_name} - {module_name}"]
+                    )
+                router.include_router(
+                    version_router,
+                    tags=[f"{subpackage_name} - {module_name}"],
+                    prefix=f"/{subpackage_name}",
+                )

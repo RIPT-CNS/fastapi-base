@@ -40,6 +40,9 @@ def get_application() -> FastAPI:
             "clientId": settings.KEYCLOAK_CLIENT_ID,
             "scopes": {"openid": "OpenID Connect scope"},
         },
+        swagger_ui_parameters={
+            "docExpansion": "none",
+        },
     )
     application.add_middleware(
         CORSMiddleware,

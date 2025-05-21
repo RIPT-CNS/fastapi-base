@@ -11,7 +11,7 @@ from app.schemas.sche_user import (
 )
 from app.services.srv_user import UserService
 
-router = APIRouter(tags=["V1 - users"], prefix=f"/users")
+router = APIRouter(prefix=f"/users")
 
 user_service: UserService = UserService()
 

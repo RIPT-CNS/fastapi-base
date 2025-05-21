@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from app.utils.exception_handler import CustomException
 
 
-router = APIRouter(tags=["V1 - test"], prefix=f"/test")
+router = APIRouter(prefix=f"/test")
 
 
 @router.get("/hello-world", response_model=str)
