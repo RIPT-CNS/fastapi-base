@@ -1,22 +1,32 @@
-import jwt
+from typing import Tuple, Any
 
-from typing import Any, Union
-from app.core.config import settings
-from datetime import datetime, timezone, timedelta
+from fastapi import Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+import jwt
 from passlib.context import CryptContext
 
+from app.core.config import settings
+from app.utils.exception_handler import CustomException, ExceptionType
+from app.utils import time_utils
+from app.schemas.sche_auth import TokenRequest
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+ALGORITHM = "HS256"
 
 
-def create_access_token(user_id: Union[int, Any]) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(
-        seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS
-    )
-    to_encode = {"exp": expire, "user_id": str(user_id)}
+def create_access_token(
+    payload: TokenRequest, expires_seconds: int = None
+) -> Tuple[str, float]:
+    if expires_seconds:
+        expire = time_utils.timestamp_after_now(seconds=expires_seconds)
+    else:
+        expire = time_utils.timestamp_after_now(
+            seconds=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        )
     encoded_jwt = jwt.encode(
-        to_encode, settings.SECRET_KEY, algorithm=settings.SECURITY_ALGORITHM
+        payload.model_dump(), settings.SECRET_KEY, algorithm=ALGORITHM
     )
-    return encoded_jwt
+    return encoded_jwt, expire.timestamp()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -25,3 +35,42 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
+
+
+def decode_jwt(token: str) -> dict[str, Any]:
+    try:
+        decoded_token = jwt.decode(token, settings.SECRET_KEY, algorithms=ALGORITHM)
+        if decoded_token["exp"] >= time_utils.timestamp_now():
+            return decoded_token
+        return None
+    except Exception as e:
+        return None
+
+
+class JWTBearer(HTTPBearer):
+    def __init__(self, auto_error: bool = True):
+        super(JWTBearer, self).__init__(auto_error=auto_error)
+
+    async def __call__(self, request: Request):
+        credentials: HTTPAuthorizationCredentials = await super(
+            JWTBearer, self
+        ).__call__(request)
+        if credentials is None:
+            raise CustomException(exception=ExceptionType.UNAUTHORIZED)
+        if not credentials.credentials:
+            raise CustomException(exception=ExceptionType.UNAUTHORIZED)
+        if not credentials.scheme == "Bearer":
+            raise CustomException(exception=ExceptionType.UNAUTHORIZED)
+        if not self.verify_jwt(credentials.credentials):
+            raise CustomException(exception=ExceptionType.UNAUTHORIZED)
+        return credentials.credentials
+
+    def verify_jwt(self, jwt_token: str) -> bool:
+        is_token_valid: bool = False
+        try:
+            payload = decode_jwt(jwt_token)
+        except Exception as e:
+            payload = None
+        if payload:
+            is_token_valid = True
+        return is_token_valid

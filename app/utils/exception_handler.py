@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import ValidationException
 from fastapi.responses import JSONResponse
-from app.schemas.sche_base import BaseResponse
+from app.schemas.sche_response import BaseResponse
 
 
 class ExceptionType(enum.Enum):

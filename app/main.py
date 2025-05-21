@@ -8,9 +8,9 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.core.router import router
 from app.models import Base
-from app.db.base import engine
+from app.core.database import engine
 from app.core.config import settings
-from app.helpers.exception_handler import (
+from app.utils.exception_handler import (
     CustomException,
     fastapi_error_handler,
     validation_exception_handler,

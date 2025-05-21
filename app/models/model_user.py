@@ -1,13 +1,24 @@
-from sqlalchemy import Column, String, Boolean, DateTime
+from sqlalchemy import Column, String, Boolean, Float
+from sqlalchemy.dialects.postgresql import ARRAY
 
 from app.models.model_base import BareBaseModel
 
 
 class User(BareBaseModel):
+    sso_sub = Column(String, index=True)
     username = Column(String, index=True)
-    full_name = Column(String, index=True)
     email = Column(String, unique=True, index=True)
-    hashed_password = Column(String(255))
+    dob = Column(Float, index=True)
+    gender = Column(String, index=True)
+    first_name = Column(String, index=True)
+    last_name = Column(String, index=True)
+    full_name = Column(String, index=True)
+    phone = Column(String, index=True)
+    address = Column(String, index=True)
+    identity_card = Column(String, index=True)
+    identity_card_date = Column(Float, index=True)
+    identity_card_place = Column(String, index=True)
     is_active = Column(Boolean, default=True)
-    role = Column(String, default="guest")
-    last_login = Column(DateTime)
+    last_login = Column(Float)
+    hashed_password = Column(String(255))
+    roles = Column(ARRAY(String), default=list)

@@ -2,10 +2,10 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.helpers.exception_handler import CustomException
+from app.utils.exception_handler import CustomException
 
 
-router = APIRouter()
+router = APIRouter(tags=["V2 - test"], prefix=f"/test")
 
 
 @router.get("/hello-world", response_model=str)

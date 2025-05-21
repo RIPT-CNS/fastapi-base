@@ -1,126 +1,105 @@
-import logging
-from typing import Any
-
-from fastapi import APIRouter, Depends
-from fastapi_sqlalchemy import db
-
-from app.helpers.exception_handler import CustomException
-from app.helpers.login_manager import PermissionRequired, AuthenticateRequired
-from app.helpers.paging import Page, PaginationParams, paginate
-from app.schemas.sche_base import DataResponse
+from typing import Any, List
+from fastapi import APIRouter, Depends, status
+from app.utils.exception_handler import CustomException
+from app.utils.login_manager import PermissionRequired, AuthenticateRequired
+from app.schemas.sche_response import DataResponse, BaseResponse
+from app.schemas.sche_base import PaginationParams, SortParams
 from app.schemas.sche_user import (
-    UserItemResponse,
     UserCreateRequest,
-    UserUpdateMeRequest,
     UserUpdateRequest,
+    UserBaseResponse,
 )
 from app.services.srv_user import UserService
-from app.models import User
 
-logger = logging.getLogger()
-router = APIRouter()
+router = APIRouter(tags=["V1 - users"], prefix=f"/users")
+
+user_service: UserService = UserService()
+
+
+@router.get(
+    "/all",
+    # dependencies=[Depends(AuthenticateRequired())],
+    response_model=DataResponse[List[UserBaseResponse]],
+    status_code=status.HTTP_200_OK,
+)
+def get_all() -> Any:
+    try:
+        data, metadata = user_service.get_all()
+        return DataResponse(http_code=status.HTTP_200_OK, data=data, metadata=metadata)
+    except Exception as e:
+        return CustomException(exception=e)
 
 
 @router.get(
     "",
-    dependencies=[Depends(AuthenticateRequired())],
-    response_model=Page[UserItemResponse],
+    # dependencies=[Depends(AuthenticateRequired())],
+    response_model=DataResponse[List[UserBaseResponse]],
+    status_code=status.HTTP_200_OK,
 )
-def get(params: PaginationParams = Depends()) -> Any:
-    """
-    API Get list User
-    """
+def get_by_filter(
+    sort_params: SortParams = Depends(),
+    filters_params: PaginationParams = Depends(),
+) -> Any:
     try:
-        _query = db.session.query(User)
-        users = paginate(model=User, query=_query, params=params)
-        return users
+        data, metadata = user_service.get_by_filter(
+            pagination_params=filters_params, sort_params=sort_params
+        )
+        return DataResponse(http_code=status.HTTP_200_OK, data=data, metadata=metadata)
     except Exception as e:
         return CustomException(exception=e)
 
 
 @router.post(
     "",
-    dependencies=[Depends(PermissionRequired("admin"))],
-    response_model=DataResponse[UserItemResponse],
+    # dependencies=[Depends(PermissionRequired("admin"))],
+    response_model=DataResponse[UserBaseResponse],
+    status_code=status.HTTP_201_CREATED,
 )
-def create(user_data: UserCreateRequest, user_service: UserService = Depends()) -> Any:
-    """
-    API Create User
-    """
-    try:
-        new_user = user_service.create_user(user_data)
-        return DataResponse(http_code=201, data=new_user)
-    except Exception as e:
-        raise CustomException(exception=e)
-
-
-@router.get(
-    "/me",
-    dependencies=[Depends(AuthenticateRequired())],
-    response_model=DataResponse[UserItemResponse],
-)
-def detail_me(
-    current_user: User = Depends(UserService.get_current_user),
-) -> DataResponse[UserItemResponse]:
-    """
-    API get detail current User
-    """
-    try:
-        return DataResponse(
-            http_code=200, data=UserItemResponse.model_validate(current_user)
-        )
-    except Exception as e:
-        raise CustomException(exception=e)
-
-
-@router.put(
-    "/me",
-    dependencies=[Depends(AuthenticateRequired())],
-    response_model=DataResponse[UserItemResponse],
-)
-def update_me(
-    user_data: UserUpdateMeRequest,
-    current_user: User = Depends(UserService.get_current_user),
-    user_service: UserService = Depends(),
-) -> DataResponse[UserItemResponse]:
-    """
-    API Update current User
-    """
+def create(user_data: UserCreateRequest) -> Any:
     # try:
-    updated_user = user_service.update_me(data=user_data, current_user=current_user)
-    return DataResponse(http_code=200, data=updated_user)
-    # except Exception as e:
-    #     raise CustomException(exception=e)
+    new_user = user_service.create(data=user_data)
+    return DataResponse(http_code=status.HTTP_201_CREATED, data=new_user)
+
+
+# except Exception as e:
+#     raise CustomException(exception=e)
 
 
 @router.get(
     "/{user_id}",
-    dependencies=[Depends(AuthenticateRequired())],
-    response_model=DataResponse[UserItemResponse],
+    # dependencies=[Depends(AuthenticateRequired())],
+    response_model=DataResponse[UserBaseResponse],
+    status_code=status.HTTP_200_OK,
 )
-def detail(user_id: int, user_service: UserService = Depends()) -> Any:
-    """
-    API get Detail User
-    """
+def get_by_id(user_id: int) -> Any:
     try:
-        return DataResponse(http_code=200, data=user_service.get(user_id))
+        user = user_service.get_by_id(id=user_id)
+        return DataResponse(http_code=status.HTTP_200_OK, data=user)
     except Exception as e:
         raise CustomException(exception=e)
 
 
 @router.put(
     "/{user_id}",
-    dependencies=[Depends(PermissionRequired("admin"))],
-    response_model=DataResponse[UserItemResponse],
+    # dependencies=[Depends(PermissionRequired("admin"))],
+    response_model=DataResponse[UserBaseResponse],
+    status_code=status.HTTP_200_OK,
 )
-def update(
-    user_id: int, user_data: UserUpdateRequest, user_service: UserService = Depends()
-) -> Any:
-    """
-    API update User
-    """
+def update_by_id(user_id: int, user_data: UserUpdateRequest) -> Any:
     try:
-        updated_user = user_service.update(user_id=user_id, data=user_data)
-        return DataResponse(http_code=200, data=updated_user)
+        updated_user = user_service.update_by_id(id=user_id, data=user_data)
+        return DataResponse(http_code=status.HTTP_200_OK, data=updated_user)
+    except Exception as e:
+        raise CustomException(exception=e)
+
+
+@router.delete(
+    "/{user_id}",
+    # dependencies=[Depends(PermissionRequired("admin"))],
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_by_id(user_id: int) -> None:
+    try:
+        user_service.delete_by_id(id=user_id)
     except Exception as e:
         raise CustomException(exception=e)
