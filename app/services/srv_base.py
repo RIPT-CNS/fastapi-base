@@ -67,6 +67,19 @@ class BaseService(Generic[ModelType], object):
         db.session.refresh(exist_obj)
         return exist_obj
 
+    def partial_update_by_id(self, id: int, data: dict[str, Any]) -> ModelType:
+        obj_data = jsonable_encoder(data)
+        exist_obj = self.get_by_id(id)
+        for field in obj_data:
+            if hasattr(exist_obj, field) and obj_data[field] is not None:
+                if isinstance(getattr(exist_obj, field), list) and not obj_data[field]:
+                    setattr(exist_obj, field, [])
+                else:
+                    setattr(exist_obj, field, obj_data[field])
+        db.session.commit()
+        db.session.refresh(exist_obj)
+        return exist_obj
+
     def delete_by_id(self, id: int) -> None:
         obj = self.get_by_id(id)
         db.session.delete(obj)

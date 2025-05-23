@@ -1,5 +1,3 @@
-import jwt
-
 from fastapi import Depends
 
 from app.models import User
