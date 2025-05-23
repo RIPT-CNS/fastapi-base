@@ -1,8 +1,7 @@
 from typing import Any, List
 from fastapi import APIRouter, Depends, status
 from app.utils.exception_handler import CustomException
-from app.utils.login_manager import PermissionRequired, AuthenticateRequired
-from app.schemas.sche_response import DataResponse, BaseResponse
+from app.schemas.sche_response import DataResponse
 from app.schemas.sche_base import PaginationParams, SortParams
 from app.schemas.sche_user import (
     UserCreateRequest,
@@ -18,7 +17,6 @@ user_service: UserService = UserService()
 
 @router.get(
     "/all",
-    # dependencies=[Depends(AuthenticateRequired())],
     response_model=DataResponse[List[UserBaseResponse]],
     status_code=status.HTTP_200_OK,
 )
@@ -32,7 +30,6 @@ def get_all() -> Any:
 
 @router.get(
     "",
-    # dependencies=[Depends(AuthenticateRequired())],
     response_model=DataResponse[List[UserBaseResponse]],
     status_code=status.HTTP_200_OK,
 )
@@ -51,23 +48,19 @@ def get_by_filter(
 
 @router.post(
     "",
-    # dependencies=[Depends(PermissionRequired("admin"))],
     response_model=DataResponse[UserBaseResponse],
     status_code=status.HTTP_201_CREATED,
 )
 def create(user_data: UserCreateRequest) -> Any:
-    # try:
-    new_user = user_service.create(data=user_data)
-    return DataResponse(http_code=status.HTTP_201_CREATED, data=new_user)
-
-
-# except Exception as e:
-#     raise CustomException(exception=e)
+    try:
+        new_user = user_service.create(data=user_data)
+        return DataResponse(http_code=status.HTTP_201_CREATED, data=new_user)
+    except Exception as e:
+        raise CustomException(exception=e)
 
 
 @router.get(
     "/{user_id}",
-    # dependencies=[Depends(AuthenticateRequired())],
     response_model=DataResponse[UserBaseResponse],
     status_code=status.HTTP_200_OK,
 )
@@ -81,7 +74,6 @@ def get_by_id(user_id: int) -> Any:
 
 @router.put(
     "/{user_id}",
-    # dependencies=[Depends(PermissionRequired("admin"))],
     response_model=DataResponse[UserBaseResponse],
     status_code=status.HTTP_200_OK,
 )
@@ -93,9 +85,21 @@ def update_by_id(user_id: int, user_data: UserUpdateRequest) -> Any:
         raise CustomException(exception=e)
 
 
+@router.patch(
+    "/{user_id}",
+    response_model=DataResponse[UserBaseResponse],
+    status_code=status.HTTP_200_OK,
+)
+def update_by_id(user_id: int, user_data: UserUpdateRequest) -> Any:
+    try:
+        updated_user = user_service.partial_update_by_id(id=user_id, data=user_data)
+        return DataResponse(http_code=status.HTTP_200_OK, data=updated_user)
+    except Exception as e:
+        raise CustomException(exception=e)
+
+
 @router.delete(
     "/{user_id}",
-    # dependencies=[Depends(PermissionRequired("admin"))],
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def delete_by_id(user_id: int) -> None:
