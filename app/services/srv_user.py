@@ -4,7 +4,7 @@ from app.services.srv_base import BaseService
 from app.core.config import settings
 from app.core.security import decode_jwt, get_password_hash
 from app.schemas.sche_auth import TokenRequest
-from app.schemas.sche_user import UserCreateRequest, UserUpdateRequest
+from app.schemas.sche_user import UserCreateRequest
 from app.utils.exception_handler import CustomException, ExceptionType
 from app.core.config import keycloak_openid
 from google.oauth2 import id_token
