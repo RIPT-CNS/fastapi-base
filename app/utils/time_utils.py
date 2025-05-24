@@ -43,16 +43,14 @@ def timestamp_after_now(
     months: int = 0,
     years: int = 0,
 ) -> float:
-    datetime_now = datetime_now()
+    datetime_now_tmp = datetime_now()
     delta = timedelta(
         seconds=seconds,
         minutes=minutes,
         hours=hours,
-        days=days,
-        months=months,
-        years=years,
+        days=days + months * 30 + years * 365,
     )
-    new_datetime = datetime_now + delta
+    new_datetime = datetime_now_tmp + delta
     return datetime_to_timestamp(new_datetime)
 
 
@@ -64,14 +62,12 @@ def timestamp_before_now(
     months: int = 0,
     years: int = 0,
 ) -> float:
-    datetime_now = datetime_now()
+    datetime_now_tmp = datetime_now()
     delta = timedelta(
         seconds=seconds,
         minutes=minutes,
         hours=hours,
-        days=days,
-        months=months,
-        years=years,
+        days=days + months * 30 + years * 365,
     )
-    new_datetime = datetime_now - delta
+    new_datetime = datetime_now_tmp - delta
     return datetime_to_timestamp(new_datetime)

@@ -13,9 +13,7 @@ router = APIRouter(prefix=f"/auth")
 @router.post("/login", response_model=DataResponse[TokenResponse])
 def login_basic(form_data: LoginRequest, auth_service: AuthService = Depends()):
     try:
-        token = auth_service.login(
-            email=form_data.username, password=form_data.password
-        )
+        token = auth_service.login(data=form_data)
         return DataResponse(http_code=200, data=token)
     except Exception as e:
         print(e, flush=True)
@@ -25,12 +23,9 @@ def login_basic(form_data: LoginRequest, auth_service: AuthService = Depends()):
 @router.post("/login-keycloak", response_model=DataResponse[TokenResponse])
 def login_keycloak(form_data: LoginRequest, auth_service: AuthService = Depends()):
     try:
-        data = auth_service.login_keycloak(
-            username=form_data.username, password=form_data.password
-        )
+        data = auth_service.login_keycloak(data=form_data)
         if not data:
             raise CustomException(exception=ExceptionType.BAD_REQUEST_DATA_MISMATCH)
-
         return DataResponse(http_code=200, data=data)
     except Exception as e:
         raise CustomException(exception=e)

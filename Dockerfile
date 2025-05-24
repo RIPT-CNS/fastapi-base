@@ -4,6 +4,10 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 
+RUN apt update 
+RUN apt upgrade -y 
+RUN apt install -y nano unixodbc unixodbc-dev
+
 WORKDIR /app
 
 COPY requirements.txt .
