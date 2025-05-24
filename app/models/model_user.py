@@ -8,8 +8,8 @@ class User(BareBaseModel):
     
     __tablename__ = "users"
     
-    sso_sub = Column(String, index=True)
-    username = Column(String, index=True)
+    sso_sub = Column(String, unique=True, index=True)
+    username = Column(String, unique=True, index=True)
     email = Column(String, unique=True, index=True)
     dob = Column(Float, index=True)
     gender = Column(String, index=True)

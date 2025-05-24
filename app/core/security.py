@@ -21,12 +21,12 @@ def create_access_token(
         expire = time_utils.timestamp_after_now(seconds=expires_seconds)
     else:
         expire = time_utils.timestamp_after_now(
-            seconds=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+            seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS
         )
     encoded_jwt = jwt.encode(
         payload.model_dump(), settings.SECRET_KEY, algorithm=ALGORITHM
     )
-    return encoded_jwt, expire.timestamp()
+    return encoded_jwt, expire
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
