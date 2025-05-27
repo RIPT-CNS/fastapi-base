@@ -18,8 +18,8 @@ class Base:
 class BareBaseModel(Base):
     __abstract__ = True
 
-    _id = Column(Integer, primary_key=True, autoincrement=True)
-    _created_at = Column(Float, default=datetime.now().timestamp)
-    _updated_at = Column(
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(Float, default=datetime.now().timestamp)
+    updated_at = Column(
         Float, default=datetime.now().timestamp, onupdate=datetime.now().timestamp
     )
