@@ -1,9 +1,7 @@
 from typing import Optional, List
-
 from pydantic import BaseModel, EmailStr
-
 from app.utils.enums import UserRole
-from app.schemas.sche_base import BaseModelSchema
+from app.schemas.sche_base import BaseModelResponse
 
 
 class UserBaseRequest(BaseModel):
@@ -39,7 +37,7 @@ class UserUpdateMeRequest(UserBaseRequest):
     pass
 
 
-class UserBaseResponse(BaseModelSchema):
+class UserBaseResponse(BaseModelResponse):
     sso_key: Optional[str] = None
     username: Optional[str] = None
     email: EmailStr

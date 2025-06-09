@@ -2,12 +2,10 @@ from pydantic import BaseModel
 from typing import Optional, Literal
 
 
-class BaseModelSchema(BaseModel):
-    __abstract__ = True
-
-    _id: int
-    _created_at: float
-    _updated_at: float
+class BaseModelResponse(BaseModel):
+    id: int
+    created_at: float
+    updated_at: float
 
 
 class PaginationParams(BaseModel):
@@ -16,5 +14,5 @@ class PaginationParams(BaseModel):
 
 
 class SortParams(BaseModel):
-    sort_by: Optional[str] = "_id"
+    sort_by: Optional[str] = "id"
     order: Optional[Literal["asc", "desc"]] = "desc"

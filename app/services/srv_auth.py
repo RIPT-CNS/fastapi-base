@@ -40,7 +40,7 @@ class AuthService(object):
                     seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS
                 ),
                 auth_time=time_utils.timestamp_now(),
-                sub=str(user._id),
+                sub=str(user.id),
                 typ="Bearer",
                 email=user.email if user.email else None,
             )
