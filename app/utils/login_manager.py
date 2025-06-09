@@ -12,7 +12,7 @@ class AuthenticateRequired:
 
     def __call__(self, http_authorization_credentials=Depends(JWTBearer())):
         print("========== Authenticate Required ==========", flush=True)
-        return UserService().get_current_user(http_authorization_credentials)
+        return UserService().get_me(http_authorization_credentials)
 
 
 class PermissionRequired:
