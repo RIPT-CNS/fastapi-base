@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, Boolean, Float
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.orm import relationship
 
 from app.models.model_base import BareBaseModel
 
@@ -25,3 +26,6 @@ class User(BareBaseModel):
     last_login = Column(Float)
     hashed_password = Column(String(255))
     roles = Column(ARRAY(String), default=list)
+    
+    threads = relationship("Thread", back_populates="users")
+    feedbacks = relationship("Feedback", back_populates="users")

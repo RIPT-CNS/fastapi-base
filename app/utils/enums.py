@@ -1,5 +1,8 @@
 import enum
 
+class SenderType(enum.Enum):
+    user = "user"
+    ai = "ai"
 
 class UserRole(enum.Enum):
     ADMIN = "Administrator"
