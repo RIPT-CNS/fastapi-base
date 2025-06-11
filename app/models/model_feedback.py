@@ -10,10 +10,10 @@ from app.models.model_base import Base, BareBaseModel
 class Feedback(BareBaseModel):
     __tablename__ = "feedback"
 
-    message_id = Column(PG_UUID(as_uuid=True), ForeignKey("message.id"), nullable=False)
-    user_id = Column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    message_id = Column(Integer, ForeignKey("message.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     rating = Column(Integer, nullable=False)
     comment = Column(Text, nullable=True)
 
     message = relationship("Message", back_populates="feedbacks")
-    user = relationship("Users", back_populates="feedbacks")
+    user = relationship("User", back_populates="feedbacks")

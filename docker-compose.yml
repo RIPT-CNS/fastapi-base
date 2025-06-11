@@ -20,7 +20,7 @@ services:
     ports:
       - 5555:5432
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      test: [ "CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}" ]
       interval: 30s
       timeout: 10s
       retries: 10
@@ -29,7 +29,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    <<: 
+    <<:
       - *common
       - *common-volumes
     command: [ "alembic", "upgrade", "head" ]
@@ -42,12 +42,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    <<: 
+    <<:
       - *common
       - *common-volumes
+    volumes:
+      - ./mount-data/vectorstore:/app/vectorstore/
     ports:
       - 8000:8000
-    command: ["/app/entrypoint.sh"]
+    command: [ "/app/entrypoint.sh" ]
     depends_on:
       db:
         condition: service_healthy

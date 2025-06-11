@@ -59,12 +59,12 @@ class UserService(BaseService[User]):
             raise CustomException(exception=ExceptionType.UNAUTHORIZED)
 
     def create(self, data: UserCreateRequest) -> User:
-        try:
-            origin_password = data.password
-            hashed_password = get_password_hash(origin_password)
-            processed_data = data.model_dump(exclude_unset=True)
-            del processed_data["password"]
-            processed_data["hashed_password"] = hashed_password
-            return super().create(processed_data)
-        except Exception as e:
-            raise CustomException(exception=ExceptionType.INTERNAL_SERVER_ERROR)
+        # try:
+        origin_password = data.password
+        hashed_password = get_password_hash(origin_password)
+        processed_data = data.model_dump(exclude_unset=True)
+        del processed_data["password"]
+        processed_data["hashed_password"] = hashed_password
+        return super().create(processed_data)
+        # except Exception as e:
+            # raise CustomException(exception=ExceptionType.INTERNAL_SERVER_ERROR)

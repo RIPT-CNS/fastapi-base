@@ -27,5 +27,5 @@ class User(BareBaseModel):
     hashed_password = Column(String(255))
     roles = Column(ARRAY(String), default=list)
     
-    threads = relationship("Thread", back_populates="users")
-    feedbacks = relationship("Feedback", back_populates="users")
+    threads = relationship("Thread", back_populates="user")
+    feedbacks = relationship("Feedback", back_populates="user")

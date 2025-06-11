@@ -52,11 +52,11 @@ def get_by_filter(
     status_code=status.HTTP_201_CREATED,
 )
 def create(user_data: UserCreateRequest) -> Any:
-    try:
-        new_user = user_service.create(data=user_data)
-        return DataResponse(http_code=status.HTTP_201_CREATED, data=new_user)
-    except Exception as e:
-        raise CustomException(exception=e)
+    # try:
+    new_user = user_service.create(data=user_data)
+    return DataResponse(http_code=status.HTTP_201_CREATED, data=new_user)
+    # except Exception as e:
+        # raise CustomException(exception=e)
 
 
 @router.get(
