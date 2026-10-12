@@ -46,6 +46,8 @@ class BareBaseModel(TimestampMixin, Base):
     """
 
     __abstract__ = True
+    # Columns that can never be filtered, searched, sorted or exported through BaseAPI
+    __hidden_fields__ = frozenset()
 
     @declared_attr.directive
     def __tablename__(cls) -> str:

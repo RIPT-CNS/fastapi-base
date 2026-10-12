@@ -49,9 +49,14 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = 20
     DB_ECHO: bool = False
 
-    # ----------------------------------------------------------- Pagination
+    # ------------------------------------------------ Pagination / BaseAPI
     PAGE_SIZE_DEFAULT: int = 20
     PAGE_SIZE_MAX: int = 100
+    # Max rows returned by GET /list and GET /many
+    LIST_MAX_ROWS: int = 1000
+    EXPORT_MAX_ROWS: int = 50_000
+    IMPORT_MAX_ROWS: int = 5_000
+    IMPORT_MAX_FILE_SIZE_MB: int = 10
 
     # ----------------------------------------------------- Local auth (JWT)
     SECRET_KEY: str = INSECURE_SECRET_KEY

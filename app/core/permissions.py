@@ -1,7 +1,8 @@
 """Role -> permission mapping (RBAC).
 
-Permissions are "<resource>:<action>" strings. CRUDRouter(permission_prefix="product")
-checks product:read (list/get), product:create, product:update (PUT/PATCH), product:delete.
+Permissions are "<resource>:<action>" strings. A BaseAPI with permission_prefix = "product"
+checks product:read, product:create, product:update, product:delete, product:import,
+product:export (the route groups of app.core.base_api).
 
 Wildcards: "*" = everything, "product:*" = every action on product.
 Roles can come from the local DB (users.roles) or from Keycloak (realm/client roles),

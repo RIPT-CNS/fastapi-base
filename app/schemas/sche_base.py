@@ -1,5 +1,6 @@
 from datetime import datetime
-from typing import Any, ClassVar, Literal
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,33 +24,30 @@ class PaginationParams(BaseModel):
     page_size: int = Field(settings.PAGE_SIZE_DEFAULT, ge=1, le=settings.PAGE_SIZE_MAX)
 
 
-class SortParams(BaseModel):
-    sort_by: str | None = None
-    order: Literal["asc", "desc"] = "desc"
+class BulkResult(BaseModel):
+    count: int = Field(description="Number of affected records")
 
 
-class ListQueryParams(BaseModel):
-    """Base of the query-string model generated per resource by CRUDRouter.
+class ImportMode(StrEnum):
+    INSERT = "insert"  # every row is a new record
+    UPDATE = "update"  # every row must match an existing record by the import key
+    UPSERT = "upsert"  # update when the key matches, insert otherwise
 
-    Generated subclasses add `sort_by` (enum of sortable fields), `search`
-    and one field per declared filter, e.g. `price__gte`.
-    """
 
-    RESERVED: ClassVar[frozenset[str]] = frozenset(
-        {"page", "page_size", "sort_by", "order", "search"}
-    )
+class ImportRowError(BaseModel):
+    row: int = Field(description="Excel row number (header = 1)")
+    column: str | None = Field(None, description="Excel column letter")
+    field: str | None = None
+    message: str
+    value: Any = None
 
-    page: int = Field(1, ge=1)
-    page_size: int = Field(settings.PAGE_SIZE_DEFAULT, ge=1, le=settings.PAGE_SIZE_MAX)
 
-    def pagination(self) -> PaginationParams:
-        return PaginationParams(page=self.page, page_size=self.page_size)
-
-    def sorting(self) -> SortParams:
-        return SortParams(
-            sort_by=getattr(self, "sort_by", None), order=getattr(self, "order", "desc")
-        )
-
-    def filters(self) -> dict[str, Any]:
-        values = self.model_dump(exclude=set(self.RESERVED))
-        return {key: value for key, value in values.items() if value is not None}
+class ImportResult(BaseModel):
+    mode: ImportMode
+    dry_run: bool = False
+    total_rows: int = 0
+    valid_rows: int = 0
+    inserted: int = 0
+    updated: int = 0
+    ignored_columns: list[str] = []
+    errors: list[ImportRowError] = []

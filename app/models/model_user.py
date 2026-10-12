@@ -11,6 +11,7 @@ from app.utils.enums import AuthProvider
 
 class User(BareBaseModel):
     __tablename__ = "users"
+    __hidden_fields__ = frozenset({"hashed_password", "token_version"})
 
     username: Mapped[str] = mapped_column(String(150), unique=True, index=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)

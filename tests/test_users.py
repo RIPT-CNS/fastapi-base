@@ -71,7 +71,7 @@ def test_list_users_filter_search_sort(client, admin_headers):
         assert response.status_code == 200, response.text
         return response.json()
 
-    body = list_users(page_size=2, sort_by="username", order="asc")
+    body = list_users(page_size=2, sort="username")
     assert [u["username"] for u in body["data"]] == ["admin1", "bob"]
     assert body["metadata"] == {"page": 1, "page_size": 2, "total": 4, "total_pages": 2}
 
@@ -79,13 +79,21 @@ def test_list_users_filter_search_sort(client, admin_headers):
     assert [u["username"] for u in list_users(is_active="false")["data"]] == ["carol"]
     assert [u["username"] for u in list_users(roles="editor")["data"]] == ["dave"]
     assert list_users(roles__in=["admin", "editor"])["metadata"]["total"] == 2
+    assert list_users(roles__in="admin,editor")["metadata"]["total"] == 2
 
 
 def test_list_users_invalid_params(client, admin_headers):
-    response = client.get(
-        "/api/v1/users", params={"sort_by": "hashed_password"}, headers=admin_headers
-    )
-    assert response.status_code == 422
+    # Hidden fields can never be used to query (no password-hash oracle)
+    for params in (
+        {"sort": "hashed_password"},
+        {"hashed_password__like": "$argon"},
+        {"search": "x", "search_fields": "hashed_password"},
+        {"filters": '[{"field": "token_version", "value": 0}]'},
+    ):
+        response = client.get("/api/v1/users", params=params, headers=admin_headers)
+        assert response.status_code == 400, params
+    response = client.get("/api/v1/users/export?fields=hashed_password", headers=admin_headers)
+    assert response.status_code == 400
     response = client.get("/api/v1/users", params={"page_size": 1000}, headers=admin_headers)
     assert response.status_code == 422
 

@@ -50,9 +50,10 @@ from app.core.keycloak import keycloak_client  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Base, User  # noqa: E402
 from app.services.srv_user import UserService  # noqa: E402
-from tests.crud_resources import items_router  # noqa: E402
+from tests.crud_resources import TEST_APIS, Category  # noqa: E402
 
-app.include_router(items_router, prefix=settings.API_PREFIX)
+for api in TEST_APIS:
+    app.include_router(api.as_router(), prefix=settings.API_PREFIX)
 
 PASSWORD = "Password@123"
 
@@ -172,3 +173,29 @@ def kc_token(rsa_private_key, monkeypatch) -> Callable[..., str]:
         return jwt.encode(claims, rsa_private_key, algorithm="RS256", headers={"kid": "test"})
 
     return make
+
+
+# ------------------------------------------------ test resources (crud_resources.py)
+@pytest.fixture
+def categories() -> dict[str, int]:
+    with SessionLocal() as db:
+        rows = [Category(name="fruit"), Category(name="vegetable")]
+        db.add_all(rows)
+        db.commit()
+        return {row.name: row.id for row in rows}
+
+
+@pytest.fixture
+def items(client, user_headers, categories):
+    payload = [
+        {"name": "Apple", "sku": "A1", "price": 10, "tags": ["red", "sweet"],
+         "released_on": "2024-01-10", "category_id": categories["fruit"]},
+        {"name": "Banana", "sku": "B1", "price": 5, "tags": ["yellow"],
+         "released_on": "2024-03-01", "category_id": categories["fruit"]},
+        {"name": "Carrot", "sku": "C1", "price": 3, "tags": ["orange"],
+         "category_id": categories["vegetable"]},
+        {"name": "100% Juice", "price": 20, "is_active": False},
+    ]  # fmt: skip
+    response = client.post("/api/test-items/many", json=payload, headers=user_headers)
+    assert response.status_code == 201, response.text
+    return response.json()["data"]

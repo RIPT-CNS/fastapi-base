@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.security import get_password_hash, verify_password
 from app.models import User
 from app.schemas.sche_user import UserCreateRequest, UserUpdateRequest
-from app.services.srv_base import BaseService
+from app.services.srv_base import BaseService, ImportContext
 from app.utils.enums import AuthProvider, UserRole
 from app.utils.exception_handler import CustomException, ExceptionType
 
@@ -17,13 +17,6 @@ from app.utils.exception_handler import CustomException, ExceptionType
 class UserService(BaseService[User, UserCreateRequest, UserUpdateRequest]):
     model = User
     search_fields = ("username", "email", "full_name", "phone")
-    filter_fields = {
-        "is_active": ("eq",),
-        "roles": ("eq", "in"),
-        "auth_provider": ("eq",),
-        "created_at": ("gte", "lte"),
-    }
-    sort_fields = ("id", "username", "email", "full_name", "created_at", "last_login")
 
     def get_by_login(self, login: str) -> User | None:
         """Find by username or email."""
@@ -49,6 +42,12 @@ class UserService(BaseService[User, UserCreateRequest, UserUpdateRequest]):
         self._save(user, commit=True)
 
     # ------------------------------------------------------------------ hooks
+    def import_transform_row(self, values: dict[str, Any], ctx: ImportContext) -> dict[str, Any]:
+        values = super().import_transform_row(values, ctx)
+        if isinstance(values.get("email"), str):
+            values["email"] = values["email"].lower()  # compared lower-case by the unique check
+        return values
+
     def before_create(self, data: dict[str, Any]) -> dict[str, Any]:
         password = data.pop("password", None)
         if password:

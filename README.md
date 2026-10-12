@@ -6,7 +6,7 @@ Backend base: **FastAPI + PostgreSQL + SQLAlchemy 2 + Alembic + Keycloak**, ch�
 - **Gọn**: 1 `Dockerfile`, 1 `docker-compose.yml`, 1 `requirements.txt`. Dev hay prod chỉ khác nhau ở `.env`.
 - **Xác thực**: JWT local (access + refresh, thu hồi token), HTTP Basic, SSO Keycloak (verify JWT offline qua JWKS, tự tạo user lần đầu đăng nhập).
 - **Phân quyền**: theo role (local + role từ Keycloak) và theo permission (`resource:action`, có wildcard).
-- **CRUD generic**: khai báo model + schema + service + 1 router là có đủ list/get/create/put/patch/delete với phân trang, lọc, tìm kiếm, sắp xếp, soft delete.
+- **BaseAPI**: khai báo 1 class là có 22 API: CRUD, bulk (many/all), phân trang, **filter/search/sort động do client tự định nghĩa**, soft delete, **import/export Excel** (validate lỗi từng dòng/cột, insert/update/upsert). Bật/tắt và phân quyền theo từng API hoặc cả model; có `BasePublicAPI`.
 - Response thống nhất, xử lý lỗi tập trung, request-id trong log, test với PostgreSQL thật.
 
 ## Khởi động nhanh
@@ -39,20 +39,20 @@ Trong Swagger, nút **Authorize** có 4 cách: `LocalLogin` (username/password),
 │   │   ├── api_auth.py         # /auth: login, token, refresh, register, me, change-password, logout
 │   │   ├── api_auth_sso.py     # /auth/sso: Keycloak (chỉ bật khi KEYCLOAK_ENABLED=true)
 │   │   ├── api_healthcheck.py  # /health-check, /health-check/ready
-│   │   └── v1/api_user.py      # CRUD users (tự động mount ở /api/v1/users)
+│   │   └── v1/api_user.py      # UserAPI(BaseAPI) (tự động mount ở /api/v1/users)
 │   ├── core
 │   │   ├── config.py           # Settings (đọc env / .env), validate cấu hình prod
 │   │   ├── database.py         # engine, get_db, DbSession
 │   │   ├── security.py         # hash password (argon2/bcrypt), JWT local
 │   │   ├── keycloak.py         # OIDC client: verify JWT qua JWKS, token/refresh/logout
 │   │   ├── permissions.py      # map role -> permission
-│   │   ├── crud_router.py      # CRUDRouter: sinh REST endpoint từ service
+│   │   ├── base_api.py         # BaseAPI / BasePublicAPI / RouteConfig
 │   │   ├── router.py           # tự động include app/api/v*/api_*.py
 │   │   ├── logging.py, middleware.py
 │   ├── models                  # model_*.py được import tự động (Alembic thấy ngay)
 │   ├── schemas                 # sche_*.py: Pydantic request/response
 │   ├── services                # srv_base.py (BaseService), srv_user.py, srv_auth.py
-│   ├── utils                   # login_manager.py (dependency auth), exception_handler.py, ...
+│   ├── utils                   # login_manager.py (auth), query_builder.py (query động), excel.py, ...
 │   ├── cli.py                  # python -m app.cli serve | migrate | seed | create-user
 │   └── main.py
 ├── alembic/versions            # migration
@@ -161,31 +161,26 @@ from app.services.srv_base import BaseService
 
 class ProductService(BaseService[Product, ProductCreateRequest, ProductUpdateRequest]):
     model = Product
-    search_fields = ("name", "sku")                    # ?search=
-    filter_fields = {                                  # ?category=..&price__gte=..
-        "category": ("eq", "in"),
-        "price": ("gte", "lte"),
-    }
-    sort_fields = ("id", "name", "price", "created_at")  # ?sort_by=&order=asc|desc
+    search_fields = ("name", "sku")   # field mặc định của ?search= (bỏ trống = mọi cột text)
 ```
 
-**4. Router** — `app/api/v1/api_product.py` (file `api_*.py` trong `app/api/vN/` được mount tự động)
+**4. API** — `app/api/v1/api_product.py` (mọi class `BaseAPI` trong file `api_*.py` ở `app/api/vN/` được mount tự động)
 
 ```python
-from app.core.crud_router import CRUDRouter
+from app.core.base_api import BaseAPI, RouteConfig
 from app.schemas.sche_product import ProductCreateRequest, ProductResponse, ProductUpdateRequest
 from app.services.srv_product import ProductService
 
-router = CRUDRouter(
-    prefix="/products",
-    tags=["Products"],
-    service=ProductService,
-    response_schema=ProductResponse,
-    create_schema=ProductCreateRequest,
-    update_schema=ProductUpdateRequest,
-    permissions={"list": None, "get": None},   # list/get public
-    permission_prefix="product",               # còn lại cần product:create / update / delete
-)
+
+class ProductAPI(BaseAPI):
+    prefix = "/products"
+    tags = ["Products"]
+    service = ProductService
+    response_schema = ProductResponse
+    create_schema = ProductCreateRequest
+    update_schema = ProductUpdateRequest
+    permission_prefix = "product"                       # product:read / create / update / ...
+    route_config = {"read": RouteConfig(auth=False)}    # các API đọc: public
 ```
 
 **5. Migration**
@@ -195,20 +190,182 @@ make migration m="add products"   # tạo file trong alembic/versions — đọc
 make migrate
 ```
 
-Kết quả: `GET/POST /api/v1/products`, `GET/PUT/PATCH/DELETE /api/v1/products/{item_id}`, và alias `/api/products` (vì `API_VERSION=v1`).
+Kết quả: 22 API ở `/api/v1/products` (và alias `/api/products` vì `API_VERSION=v1`), gồm CRUD, bulk, import/export Excel.
 
-### CRUDRouter
+### BaseAPI — danh sách API
 
-| Tham số | Ý nghĩa |
+| Key | Method + path | Nhóm |
+| --- | --- | --- |
+| `get_page` | `GET /products` (phân trang) | read |
+| `get_list` | `GET /products/list` (không phân trang, tối đa `LIST_MAX_ROWS`) | read |
+| `get_many` | `GET /products/many?ids=1&ids=2` | read |
+| `get_first` | `GET /products/first` (bản ghi đầu tiên khớp query) | read |
+| `get_one` | `GET /products/{id}` | read |
+| `count` | `GET /products/count` | read |
+| `create` / `create_many` | `POST /products` / `POST /products/many` (body: list) | create |
+| `update_one` / `patch_one` | `PUT` / `PATCH /products/{id}` | update |
+| `update_many` / `patch_many` | `PUT` / `PATCH /products/many` (body: `[{"id": 1, ...}, ...]`) | update |
+| `update_all` / `patch_all` | `PUT` / `PATCH /products/all?<filter>` (cùng giá trị cho mọi bản ghi khớp) | update |
+| `delete_one` / `delete_many` / `delete_all` | `DELETE /products/{id}` / `/many?ids=` / `/all?<filter>` | delete |
+| `import_template` | `GET /products/import/template` | import |
+| `import_validate` | `POST /products/import/validate?mode=` (chỉ kiểm tra, không ghi) | import |
+| `import_data` | `POST /products/import?mode=insert\|update\|upsert` | import |
+| `export` | `GET /products/export?fields=` | export |
+| `export_importable` | `GET /products/export/importable` (định dạng nhập lại được) | export |
+
+- `PUT` ghi **toàn bộ** field của `update_schema` (field không gửi về giá trị mặc định); `PATCH` chỉ ghi field có gửi.
+- `/all` (update/delete) từ chối chạy nếu không có filter/search, trừ khi thêm `?confirm=true`.
+- Mọi thao tác ghi chạy hook của service từng bản ghi (hash password, soft delete, ...) và nằm trong 1 transaction.
+
+### Query động (filter, search, sort)
+
+Client tự chọn field, toán tử, giá trị khi gọi API; backend không cần khai báo trước. Áp dụng cho mọi API đọc, `/all` và export.
+
+```text
+# Viết tắt: field__op=value (nhiều điều kiện = AND)
+GET /products?price__gte=10&price__lt=100&category.name__in=fruit,veg&name__like=táo
+
+# JSON, có or / and / not, lồng nhau tuỳ ý
+GET /products?filters=[{"or":[{"field":"price","op":"gte","value":100},
+                              {"field":"owner.email","op":"endswith","value":"@ptit.edu.vn"}]},
+                       {"not":{"field":"tags","value":"hidden"}}]
+
+GET /products?search=bút&search_fields=name,sku,category.name     # ILIKE, OR giữa các field
+GET /products?sort=-price,name                                     # "-" = giảm dần
+```
+
+| Toán tử | Ý nghĩa |
 | --- | --- |
-| `service`, `response_schema` | bắt buộc |
-| `create_schema` / `update_schema` | bỏ trống thì không sinh route create / update+patch |
-| `exclude=("update", "delete")` | bỏ route. Action: `list`, `get`, `create`, `update` (PUT), `patch`, `delete` |
-| `permission_prefix="product"` | list/get → `product:read`, create → `product:create`, PUT/PATCH → `product:update`, delete → `product:delete` |
-| `permissions={...}` | ghi đè theo action: `None` = public, `["admin", "editor"]` = có một trong các role, hoặc 1 dependency bất kỳ, vd. `PermissionRequired("x:y")` |
-| `auth_required=True` | action không cấu hình gì thì yêu cầu đăng nhập |
+| `eq` (mặc định), `ne`, `gt`, `gte`, `lt`, `lte` | so sánh |
+| `in`, `not_in` | danh sách: `a,b,c` hoặc lặp lại tham số |
+| `between` | `?price__between=10,20` |
+| `like`, `not_like`, `startswith`, `endswith` | không phân biệt hoa thường, ký tự `%` `_` được escape |
+| `isnull` | `?deleted_at__isnull=true`; trên quan hệ: `?category__isnull=true` |
 
-PATCH chỉ ghi các field client gửi lên. PUT ghi **toàn bộ** field của `update_schema` (field không gửi nhận giá trị mặc định).
+- Field đi qua quan hệ bằng dấu chấm (`owner.email`, `items.name`, tối đa 4 cấp): quan hệ 1 dùng `has`, quan hệ nhiều dùng `any`.
+- Cột ARRAY: `eq` = có chứa phần tử, `in` = có chung ít nhất 1 phần tử.
+- Giá trị tự ép kiểu theo cột (`"10"` → số, `"2024-01-31"` → ngày); sai kiểu, field không tồn tại hoặc toán tử lạ → 400.
+- Cột liệt kê trong `__hidden_fields__` của model (vd. `User.hashed_password`) **không bao giờ** lọc/tìm/sắp xếp/export được.
+- Tên tham số dành riêng (không dùng làm filter viết tắt được, hãy dùng `filters=`): `filters search search_fields sort page page_size ids fields confirm mode`.
+
+### BaseAPI — cấu hình
+
+| Thuộc tính class | Mặc định | Ý nghĩa |
+| --- | --- | --- |
+| `prefix`, `tags`, `service`, `response_schema` | | bắt buộc (`tags` mặc định = tên model) |
+| `create_schema` / `update_schema` | `None` | thiếu thì không sinh nhóm create / update |
+| `import_schema` | `create_schema` | **ghi đè model dữ liệu import** (cột Excel + validate) |
+| `import_key` | `"id"` | cột để khớp bản ghi khi import update/upsert (id hoặc cột unique, vd. `sku`) |
+| `enable_import` / `enable_export` | `True` | bật/tắt import, export Excel |
+| `disabled_routes` | `()` | tắt route theo key hoặc theo nhóm: `("delete_all", "import")` |
+| `auth_required` | `True` | auth cho **cả model** |
+| `roles` | `None` | role cho **cả model** (có 1 trong các role); `None` = chỉ cần đăng nhập |
+| `permission_prefix` | `None` | yêu cầu permission `<prefix>:<nhóm>` |
+| `route_config` | `{}` | cấu hình **từng API** (theo key) hoặc từng nhóm, ưu tiên key |
+| `list_limit`, `export_limit`, `import_max_rows`, `import_max_file_size_mb` | theo `.env` | giới hạn |
+
+```python
+class ProductAPI(BaseAPI):
+    ...
+    roles = ["admin", "manager"]                     # mặc định cho cả model
+    disabled_routes = ("delete_all",)
+    route_config = {
+        "read": RouteConfig(auth=False),             # nhóm read: public
+        "export": RouteConfig(roles=["admin", "manager", "viewer"]),
+        "delete_one": RouteConfig(roles=["admin"]),  # riêng 1 API
+        "import": RouteConfig(permissions=["product:import"]),
+        "create": RouteConfig(dependencies=[check_quota]),  # dependency tuỳ ý
+        "update_all": RouteConfig(enabled=False),
+    }
+```
+
+`RouteConfig(enabled, auth, roles, permissions, dependencies)`: giá trị `None` = kế thừa cấu hình của class.
+
+**BasePublicAPI**: kế thừa `BaseAPI` nhưng bỏ hoàn toàn auth và role, mọi route đều public:
+
+```python
+class CategoryAPI(BasePublicAPI):
+    prefix = "/categories"
+    service = CategoryService
+    response_schema = CategoryResponse
+    create_schema = CategoryRequest
+```
+
+### Import / Export Excel
+
+**Import** — quy trình 3 bước, tất cả dòng hợp lệ mới ghi (1 transaction), có lỗi thì không ghi gì:
+
+1. `GET /import/template` → file mẫu: sheet `data` có header (cột bắt buộc màu đỏ, comment ghi kiểu dữ liệu), sheet `guide` mô tả từng cột.
+2. `POST /import/validate?mode=...` (file `multipart/form-data`) → kết quả kiểm tra, không ghi DB.
+3. `POST /import?mode=...` → ghi; có lỗi thì trả 422 kèm danh sách lỗi.
+
+| Mode | Hành vi |
+| --- | --- |
+| `insert` | mọi dòng là bản ghi mới (cột `id` bị bỏ qua) |
+| `update` | mỗi dòng phải khớp bản ghi có sẵn theo `import_key`; chỉ ô có dữ liệu được ghi |
+| `upsert` | khớp thì update, không khớp thì insert |
+
+Lỗi trả về theo từng dòng, từng cột:
+
+```json
+{"row": 5, "column": "C", "field": "price", "message": "Input should be greater than or equal to 0", "value": -5}
+```
+
+Kiểm tra sẵn có: kiểu dữ liệu và ràng buộc của schema, bản ghi không tồn tại (update), **trùng giá trị unique** trong file hoặc với dữ liệu đã có. Header khớp theo tên field, alias hoặc `title`; cột lạ bị bỏ qua (trả về trong `ignored_columns`). Ô số trong cột text tự thành chuỗi, cột danh sách nhận JSON hoặc `a, b, c`.
+
+Mỗi bước là một hàm của service, ghi đè để tuỳ biến theo model:
+
+| Bước | Hàm | Dùng để |
+| --- | --- | --- |
+| Nhận dữ liệu | `import_read(content, ctx, max_rows)` | đọc file khác, map header khác |
+| | `import_transform_row(values, ctx)` | chuẩn hoá giá trị thô (trim, lower, đổi mã → id, ...) |
+| Validate | `import_validate(rows, ctx)` | toàn bộ quy trình validate |
+| | `import_validate_row(row, ctx)` → `{field: lỗi}` | rule nghiệp vụ từng dòng; được sửa `row.data` |
+| | `import_validate_unique(rows, ctx)` | kiểm tra trùng giữa các dòng |
+| Ghi DB | `import_save(rows, ctx, result)` / `import_save_row(row, ctx)` | cách ghi (mặc định dùng `create`/`update` nên chạy hook) |
+
+Ví dụ: file import dùng **tên danh mục** thay vì id (`import_schema` riêng + đổi ở bước validate):
+
+```python
+class ProductImport(BaseSchema):
+    name: str = Field(title="Tên sản phẩm")
+    sku: str
+    price: Decimal = Decimal(0)
+    category_name: str | None = None
+
+
+class ProductService(BaseService[Product, ProductCreateRequest, ProductUpdateRequest]):
+    model = Product
+
+    def import_validate_row(self, row, ctx):
+        name = row.data.pop("category_name", None)
+        if name is None:
+            return {}
+        category = self.db.scalar(select(Category).where(Category.name == name))
+        if category is None:
+            return {"category_name": f"Không có danh mục '{name}'"}
+        row.data["category_id"] = category.id
+        return {}
+
+    def import_export_value(self, obj, name):           # để export_importable xuất đúng cột này
+        if name == "category_name":
+            return obj.category.name if obj.category else None
+        return super().import_export_value(obj, name)
+
+
+class ProductAPI(BaseAPI):
+    ...
+    import_schema = ProductImport
+    import_key = "sku"
+```
+
+**Export**
+
+- `GET /export?fields=id,name,category.name,tags,items&<filter/search/sort>`: chọn cột (mặc định mọi cột không ẩn), lọc như API đọc.
+  - Cột thường, quan hệ 1 (`category.name`) → 1 cột giá trị; quan hệ 1 không chọn field con (`category`) → object JSON.
+  - Quan hệ nhiều (`items`, `items.name`) và cột ARRAY → mảng JSON (`["a","b"]`).
+  - Quan hệ được nạp bằng `selectinload` (không N+1). Text bắt đầu bằng `=` không bao giờ thành công thức Excel.
+- `GET /export/importable`: cùng cột với file mẫu import (kèm `import_key`). Sửa file rồi import lại bằng `mode=update`/`upsert`.
 
 ### BaseService
 
@@ -216,15 +373,14 @@ Dùng trong endpoint tự viết: `service: Annotated[ProductService, Depends()]
 
 | Đọc | Ghi |
 | --- | --- |
-| `get_by_id(id)` — 404 nếu không có | `create(data)` |
-| `get_by_id_optional(id)` | `update(obj, data, partial=True)` |
-| `get_one_by(**cond)`, `exists(**cond)`, `count(filters)` | `update_by_id(id, data)` (PUT), `partial_update_by_id(id, data)` (PATCH) |
-| `get_by_filter(pagination, sort, filters, search)` → `(items, metadata)` | `delete(obj, hard=False)`, `delete_by_id(id)` |
-| `get_all(sort, filters, search)` — không phân trang | mọi hàm ghi có `commit=False` để gộp nhiều thao tác trong 1 transaction |
+| `get_by_id(id)` (404), `get_by_id_optional(id)`, `get_one_by(**cond)`, `exists(**cond)` | `create(data)`, `create_many(items)` |
+| `get_first(q)`, `get_list(q, limit)`, `get_page(q, pagination)`, `count(q)` | `update(obj, data, partial=True)`, `update_by_id`, `partial_update_by_id` |
+| `get_many(ids)` | `update_many(items, partial)`, `update_all(q, data, partial)` |
+| `build_query(q)` → `Select` để tự viết tiếp | `delete(obj, hard=False)`, `delete_by_id`, `delete_many(ids)`, `delete_all(q)` |
 
-Toán tử lọc (`field__op`): `eq` (tên field trơn), `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `not_in`, `like` (ILIKE chứa, đã escape), `isnull`. Với cột ARRAY: `eq` = chứa phần tử, `in` = giao nhau.
+`q` nhận `QuerySpec`, dict viết tắt hoặc list JSON y như API: `service.get_list({"price__gte": 10, "category.name": "fruit"})`. Mọi hàm ghi có `commit=False` để gộp nhiều thao tác trong 1 transaction.
 
-Hook để viết nghiệp vụ: `before_create(data) -> data`, `after_create(obj)`, `before_update(obj, data) -> data`, `after_update(obj)`, `before_delete(obj)`, `after_delete(obj)`. Override `get_query()` để thêm join/eager-load hoặc lọc theo dòng.
+Hook nghiệp vụ: `before_create(data) -> data`, `after_create(obj)`, `before_update(obj, data) -> data`, `after_update(obj)`, `before_delete(obj)`, `after_delete(obj)`. Override `get_query()` để thêm join/eager-load hoặc lọc theo dòng — áp dụng cho mọi API đọc, bulk, export.
 
 Ví dụ phân quyền theo dòng (user chỉ thấy/sửa sản phẩm của mình, admin thấy hết):
 

@@ -10,6 +10,7 @@ alembic==1.20.0
 PyJWT[crypto]==2.15.1
 pwdlib[argon2,bcrypt]==0.3.1
 httpx==0.28.1
+openpyxl==3.1.5
 
 # Test & lint
 pytest==9.1.1
