@@ -1,65 +1,82 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from fastapi.exceptions import ValidationException
-import uvicorn
 from fastapi import FastAPI
-from fastapi_sqlalchemy import DBSessionMiddleware
-from starlette.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
-from app.core.router import router
-from app.models import Base
-from app.core.database import engine
 from app.core.config import settings
-from app.utils.exception_handler import (
-    CustomException,
-    fastapi_error_handler,
-    validation_exception_handler,
-    custom_error_handler,
-)
+from app.core.logging import setup_logging
 
-logging.config.fileConfig(settings.LOGGING_CONFIG_FILE, disable_existing_loggers=False)
-Base.metadata.create_all(bind=engine)
+setup_logging()
+
+from app.core.database import engine  # noqa: E402
+from app.core.middleware import RequestContextMiddleware  # noqa: E402
+from app.core.router import router  # noqa: E402
+from app.utils.exception_handler import register_exception_handlers  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    logger.info(
+        "Starting %s v%s (env=%s, keycloak=%s, basic_auth=%s)",
+        settings.PROJECT_NAME,
+        settings.VERSION,
+        settings.ENVIRONMENT,
+        settings.KEYCLOAK_ENABLED,
+        settings.AUTH_BASIC_ENABLED,
+    )
+    yield
+    engine.dispose()
 
 
 def get_application() -> FastAPI:
+    swagger_oauth = None
+    if settings.KEYCLOAK_ENABLED:
+        swagger_oauth = {
+            "clientId": settings.KEYCLOAK_FRONTEND_CLIENT_ID or settings.KEYCLOAK_CLIENT_ID,
+            "usePkceWithAuthorizationCodeGrant": True,
+            "scopes": "openid profile email",
+        }
+
     application = FastAPI(
         title=settings.PROJECT_NAME,
-        docs_url="/docs",
-        redoc_url="/re-docs",
-        openapi_url=f"{settings.API_PREFIX}/openapi.json",
-        description="""
-        Base frame with FastAPI micro framework + Postgresql
-            - Login/Register with JWT
-            - Permission
-            - CRUD User
-            - Unit testing with Pytest
-            - Dockerize
-        """,
+        version=settings.VERSION,
+        description=(
+            "FastAPI + PostgreSQL base: local JWT, HTTP Basic, Keycloak SSO, RBAC and generic CRUD."
+        ),
         debug=settings.DEBUG,
-        swagger_ui_init_oauth={
-            "clientId": settings.KEYCLOAK_CLIENT_ID,
-            "scopes": {"openid": "OpenID Connect scope"},
-        },
+        lifespan=lifespan,
+        docs_url="/docs" if settings.DOCS_ENABLED else None,
+        redoc_url="/re-docs" if settings.DOCS_ENABLED else None,
+        openapi_url=f"{settings.API_PREFIX}/openapi.json" if settings.DOCS_ENABLED else None,
+        swagger_ui_init_oauth=swagger_oauth,
         swagger_ui_parameters={
             "docExpansion": "none",
+            "persistAuthorization": True,
+            "displayRequestDuration": True,
         },
     )
-    application.add_middleware(
-        CORSMiddleware,
-        allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    application.add_middleware(DBSessionMiddleware, db_url=settings.DATABASE_URL)
-    application.include_router(router, prefix=settings.API_PREFIX)
-    application.add_exception_handler(CustomException, custom_error_handler)
-    application.add_exception_handler(ValidationException, validation_exception_handler)
-    application.add_exception_handler(Exception, fastapi_error_handler)
 
+    # Last added = outermost
+    application.add_middleware(GZipMiddleware, minimum_size=1024)
+    if settings.BACKEND_CORS_ORIGINS:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.BACKEND_CORS_ORIGINS,
+            allow_credentials="*" not in settings.BACKEND_CORS_ORIGINS,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["X-Request-ID"],
+        )
+    application.add_middleware(RequestContextMiddleware)
+
+    application.include_router(router, prefix=settings.API_PREFIX)
+    register_exception_handlers(application)
     return application
 
 
 app = get_application()
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=settings.DEBUG)

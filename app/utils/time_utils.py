@@ -1,12 +1,12 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 
 def timestamp_now() -> float:
-    return datetime.now(timezone.utc).timestamp()
+    return datetime.now(UTC).timestamp()
 
 
 def timestamp_to_datetime(timestamp: float) -> datetime:
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    return datetime.fromtimestamp(timestamp, tz=UTC)
 
 
 def datetime_to_timestamp(dt: datetime) -> float:
@@ -14,7 +14,7 @@ def datetime_to_timestamp(dt: datetime) -> float:
 
 
 def datetime_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def datetime_to_str(dt: datetime) -> str:
@@ -22,7 +22,7 @@ def datetime_to_str(dt: datetime) -> str:
 
 
 def str_to_datetime(date_str: str) -> datetime:
-    return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
 
 
 def str_to_timestamp(date_str: str) -> float:

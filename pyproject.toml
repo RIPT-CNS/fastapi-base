@@ -1,0 +1,19 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["alembic/versions", "*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# B008: FastAPI's Depends()/Query() in argument defaults
+# UP046/UP047: keep typing.Generic (clearer with pydantic / SQLAlchemy generics)
+ignore = ["B008", "UP046", "UP047"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+# ./alembic is the migrations folder, not the alembic package
+known-third-party = ["alembic"]

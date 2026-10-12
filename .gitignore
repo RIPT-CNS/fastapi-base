@@ -47,6 +47,8 @@ nosetests.xml
 coverage.xml
 *.cover
 .hypothesis/
+.pytest_cache/
+.ruff_cache/
 
 # Flask stuff:
 instance/
@@ -69,13 +71,12 @@ celerybeat-schedule
 
 # dotenv
 .env
+.env.*
+!.env.example
 
 # virtualenv
 .venv/*
 venv/*
-
-# docker local data
-docker/
 
 # .DS_Store
 .DS_Store

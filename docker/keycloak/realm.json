@@ -1,0 +1,111 @@
+{
+  "realm": "${REALM_NAME}",
+  "displayName": "${REALM_NAME}",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      { "name": "admin", "description": "Administrator" },
+      { "name": "user", "description": "Normal user" },
+      { "name": "guest", "description": "Guest" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "${REALM_BACKEND_CLIENT_ID}",
+      "name": "Backend API (confidential)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${REALM_BACKEND_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["${REALM_APP_URL}/*", "${REALM_FRONTEND_URL}/*"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "post.logout.redirect.uris": "+"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-backend",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "${REALM_BACKEND_CLIENT_ID}",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "${REALM_FRONTEND_CLIENT_ID}",
+      "name": "Frontend / Swagger UI (public, PKCE)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "${REALM_APP_URL}/docs/oauth2-redirect",
+        "${REALM_FRONTEND_URL}/*"
+      ],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-backend",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "${REALM_BACKEND_CLIENT_ID}",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "sso-admin",
+      "email": "sso-admin@example.com",
+      "firstName": "SSO",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": ["admin", "user"],
+      "credentials": [
+        { "type": "password", "value": "${REALM_DEMO_PASSWORD}", "temporary": false }
+      ]
+    },
+    {
+      "username": "sso-user",
+      "email": "sso-user@example.com",
+      "firstName": "SSO",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": ["user"],
+      "credentials": [
+        { "type": "password", "value": "${REALM_DEMO_PASSWORD}", "temporary": false }
+      ]
+    }
+  ]
+}

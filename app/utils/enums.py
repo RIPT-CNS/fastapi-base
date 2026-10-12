@@ -1,14 +1,20 @@
-import enum
+from enum import StrEnum
 
 
-class UserRole(enum.Enum):
-    ADMIN = "Administrator"
-    USER = "Normal user"
-    SPECIALIST = "Specialist"
-    GUEST = "Guest"
+class UserRole(StrEnum):
+    """Role names. Keep them identical to Keycloak realm/client role names."""
+
+    ADMIN = "admin"
+    USER = "user"
+    GUEST = "guest"
 
 
-class UserGender(enum.Enum):
-    MALE = "Male"
-    FEMALE = "Female"
-    OTHER = "Other"
+class UserGender(StrEnum):
+    MALE = "male"
+    FEMALE = "female"
+    OTHER = "other"
+
+
+class AuthProvider(StrEnum):
+    LOCAL = "local"
+    KEYCLOAK = "keycloak"
