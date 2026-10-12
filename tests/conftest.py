@@ -50,6 +50,7 @@ from app.core.keycloak import keycloak_client  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Base, User  # noqa: E402
 from app.services.srv_user import UserService  # noqa: E402
+from app.utils.enums import UserRole  # noqa: E402
 from tests.crud_resources import TEST_APIS, Category  # noqa: E402
 
 for api in TEST_APIS:
@@ -121,7 +122,7 @@ def bearer(token: str) -> dict[str, str]:
 
 @pytest.fixture
 def admin_user() -> User:
-    return create_user("admin1", roles=["admin"])
+    return create_user("admin1", roles=[UserRole.ADMIN])
 
 
 @pytest.fixture

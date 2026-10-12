@@ -1,11 +1,13 @@
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy.engine import URL
+
+from app.utils.enums import Environment
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -22,7 +24,7 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------ App
     # dev: hot reload, single process. Other values: WEB_CONCURRENCY worker processes
-    ENVIRONMENT: Literal["dev", "test", "staging", "prod"] = "dev"
+    ENVIRONMENT: Environment = Environment.DEV
     WEB_CONCURRENCY: int = 2
     PROJECT_NAME: str = "FASTAPI_BASE"
     VERSION: str = "1.0.0"
@@ -113,7 +115,7 @@ class Settings(BaseSettings):
             missing = [name for name in required if not getattr(self, name)]
             if missing:
                 raise ValueError(f"KEYCLOAK_ENABLED=true but missing: {', '.join(missing)}")
-        if self.ENVIRONMENT == "prod":
+        if self.ENVIRONMENT == Environment.PROD:
             if "change-me" in self.SECRET_KEY or len(self.SECRET_KEY) < 32:
                 raise ValueError(
                     "SECRET_KEY must be set to a random value of >= 32 chars in prod "
@@ -125,7 +127,7 @@ class Settings(BaseSettings):
 
     @property
     def is_prod(self) -> bool:
-        return self.ENVIRONMENT == "prod"
+        return self.ENVIRONMENT == Environment.PROD
 
     @property
     def jwt_issuer(self) -> str:

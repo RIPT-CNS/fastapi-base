@@ -16,7 +16,7 @@ Routes (key: method path)                              group
     get_many:          GET    /many?ids=1&ids=2        read
     get_page:          GET    ""                       read
     get_one:           GET    /{item_id}               read
-    create:            POST   ""                       create
+    create_one:        POST   ""                       create
     create_many:       POST   /many                    create
     update_one:        PUT    /{item_id}               update   (full)
     patch_one:         PATCH  /{item_id}               update   (partial)
@@ -30,7 +30,7 @@ Routes (key: method path)                              group
     import_template:   GET    /import/template         import
     import_validate:   POST   /import/validate         import   (dry run, returns row errors)
     import_data:       POST   /import?mode=insert|update|upsert   import
-    export:            GET    /export?fields=a,b.c&format=xlsx|csv   export
+    export_data:       GET    /export?fields=a,b.c&format=xlsx|csv   export
     export_importable: GET    /export/importable       export   (re-importable format)
 
 Every read/export/bulk route accepts the dynamic query of app.utils.query_builder:
@@ -40,7 +40,7 @@ Every read/export/bulk route accepts the dynamic query of app.utils.query_builde
 Access control, resolved per route (route key first, then its group):
     public = True                    -> no auth at all (see BasePublicAPI)
     RouteConfig(auth=False)          -> this route is public
-    RouteConfig(roles=["admin"])     -> any of these roles
+    RouteConfig(roles=[UserRole.ADMIN]) -> any of these roles
     RouteConfig(permissions=[...])   -> all of these permissions
     otherwise the class values: auth_required, roles, permission_prefix ("<prefix>:<group>")
 """
@@ -48,7 +48,8 @@ Access control, resolved per route (route key first, then its group):
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Any, BinaryIO, ClassVar, Literal
+from http import HTTPMethod
+from typing import Annotated, Any, BinaryIO, ClassVar
 
 from fastapi import APIRouter, Body, Depends, File, Query, Request, UploadFile, status
 from fastapi.responses import Response
@@ -56,9 +57,11 @@ from pydantic import BaseModel, create_model
 from sqlalchemy import inspect as sa_inspect
 
 from app.core.config import settings
-from app.schemas.sche_base import BulkResult, ImportMode, ImportResult, PaginationParams
+from app.core.permissions import permission
+from app.schemas.sche_base import BulkResult, ImportResult, PaginationParams
 from app.schemas.sche_response import BaseResponse, DataResponse, PageResponse
 from app.services.srv_base import BaseService
+from app.utils.enums import ExportFormat, ImportMode, QueryParam, Route, RouteGroup
 from app.utils.excel import (
     CSV_MEDIA_TYPE,
     XLSX_MEDIA_TYPE,
@@ -78,37 +81,34 @@ from app.utils.query_builder import (
 )
 
 # (key, method, path, group) - static paths before /{item_id}
-ROUTES: tuple[tuple[str, str, str, str], ...] = (
-    ("count", "GET", "/count", "read"),
-    ("get_first", "GET", "/first", "read"),
-    ("get_list", "GET", "/list", "read"),
-    ("get_many", "GET", "/many", "read"),
-    ("get_page", "GET", "", "read"),
-    ("export", "GET", "/export", "export"),
-    ("export_importable", "GET", "/export/importable", "export"),
-    ("import_template", "GET", "/import/template", "import"),
-    ("import_validate", "POST", "/import/validate", "import"),
-    ("import_data", "POST", "/import", "import"),
-    ("create", "POST", "", "create"),
-    ("create_many", "POST", "/many", "create"),
-    ("update_many", "PUT", "/many", "update"),
-    ("patch_many", "PATCH", "/many", "update"),
-    ("update_all", "PUT", "/all", "update"),
-    ("patch_all", "PATCH", "/all", "update"),
-    ("delete_many", "DELETE", "/many", "delete"),
-    ("delete_all", "DELETE", "/all", "delete"),
-    ("get_one", "GET", "/{item_id}", "read"),
-    ("update_one", "PUT", "/{item_id}", "update"),
-    ("patch_one", "PATCH", "/{item_id}", "update"),
-    ("delete_one", "DELETE", "/{item_id}", "delete"),
+ROUTES: tuple[tuple[Route, HTTPMethod, str, RouteGroup], ...] = (
+    (Route.COUNT, HTTPMethod.GET, "/count", RouteGroup.READ),
+    (Route.GET_FIRST, HTTPMethod.GET, "/first", RouteGroup.READ),
+    (Route.GET_LIST, HTTPMethod.GET, "/list", RouteGroup.READ),
+    (Route.GET_MANY, HTTPMethod.GET, "/many", RouteGroup.READ),
+    (Route.GET_PAGE, HTTPMethod.GET, "", RouteGroup.READ),
+    (Route.EXPORT_DATA, HTTPMethod.GET, "/export", RouteGroup.EXPORT),
+    (Route.EXPORT_IMPORTABLE, HTTPMethod.GET, "/export/importable", RouteGroup.EXPORT),
+    (Route.IMPORT_TEMPLATE, HTTPMethod.GET, "/import/template", RouteGroup.IMPORT),
+    (Route.IMPORT_VALIDATE, HTTPMethod.POST, "/import/validate", RouteGroup.IMPORT),
+    (Route.IMPORT_DATA, HTTPMethod.POST, "/import", RouteGroup.IMPORT),
+    (Route.CREATE_ONE, HTTPMethod.POST, "", RouteGroup.CREATE),
+    (Route.CREATE_MANY, HTTPMethod.POST, "/many", RouteGroup.CREATE),
+    (Route.UPDATE_MANY, HTTPMethod.PUT, "/many", RouteGroup.UPDATE),
+    (Route.PATCH_MANY, HTTPMethod.PATCH, "/many", RouteGroup.UPDATE),
+    (Route.UPDATE_ALL, HTTPMethod.PUT, "/all", RouteGroup.UPDATE),
+    (Route.PATCH_ALL, HTTPMethod.PATCH, "/all", RouteGroup.UPDATE),
+    (Route.DELETE_MANY, HTTPMethod.DELETE, "/many", RouteGroup.DELETE),
+    (Route.DELETE_ALL, HTTPMethod.DELETE, "/all", RouteGroup.DELETE),
+    (Route.GET_ONE, HTTPMethod.GET, "/{item_id}", RouteGroup.READ),
+    (Route.UPDATE_ONE, HTTPMethod.PUT, "/{item_id}", RouteGroup.UPDATE),
+    (Route.PATCH_ONE, HTTPMethod.PATCH, "/{item_id}", RouteGroup.UPDATE),
+    (Route.DELETE_ONE, HTTPMethod.DELETE, "/{item_id}", RouteGroup.DELETE),
 )
-ROUTE_GROUPS = {key: group for key, _, _, group in ROUTES}
+ROUTE_GROUPS: dict[Route, RouteGroup] = {key: group for key, _, _, group in ROUTES}
 
 # Query params that are not shorthand filters
-RESERVED_PARAMS = frozenset(
-    {"filters", "search", "search_fields", "sort", "page", "page_size", "ids", "fields",
-     "confirm", "mode", "format"}
-)  # fmt: skip
+RESERVED_PARAMS = frozenset(QueryParam)
 
 _XLSX_RESPONSE = {200: {"content": {XLSX_MEDIA_TYPE: {}}, "description": "Excel file"}}
 _EXPORT_RESPONSE = {
@@ -118,7 +118,7 @@ _EXPORT_RESPONSE = {
 
 @dataclass(frozen=True)
 class RouteConfig:
-    """Per route (key) or per group ("read", "create", "update", "delete", "import", "export").
+    """Per route (Route.DELETE_ONE) or per group (RouteGroup.READ).
     None = inherit the class-level value."""
 
     enabled: bool = True
@@ -188,15 +188,15 @@ class BaseAPI:
     # ------------------------------------------------------------- features
     enable_import: ClassVar[bool] = True
     enable_export: ClassVar[bool] = True
-    # Route keys or groups to remove, e.g. ("delete_all", "import")
-    disabled_routes: ClassVar[Sequence[str]] = ()
+    # Routes or groups to remove, e.g. (Route.DELETE_ALL, RouteGroup.IMPORT)
+    disabled_routes: ClassVar[Sequence[Route | RouteGroup]] = ()
 
     # ------------------------------------------------- access (whole model)
     public: ClassVar[bool] = False
     auth_required: ClassVar[bool] = True
     roles: ClassVar[Sequence[str] | None] = None
     permission_prefix: ClassVar[str | None] = None
-    route_config: ClassVar[Mapping[str, RouteConfig]] = {}
+    route_config: ClassVar[Mapping[Route | RouteGroup, RouteConfig]] = {}
 
     # ------------------------------------------- limits (0 = no limit, from .env)
     list_limit: ClassVar[int] = settings.LIST_MAX_ROWS
@@ -242,32 +242,32 @@ class BaseAPI:
     def import_model(self) -> type[BaseModel] | None:
         return self.import_schema or self.create_schema
 
-    def route_config_for(self, key: str) -> RouteConfig:
+    def route_config_for(self, key: Route) -> RouteConfig:
         return (
             self.route_config.get(key) or self.route_config.get(ROUTE_GROUPS[key]) or RouteConfig()
         )
 
-    def route_enabled(self, key: str) -> bool:
+    def route_enabled(self, key: Route) -> bool:
         group = ROUTE_GROUPS[key]
         if key in self.disabled_routes or group in self.disabled_routes:
             return False
         if not self.route_config_for(key).enabled:
             return False
-        if group == "create":
+        if group == RouteGroup.CREATE:
             return self.create_schema is not None
-        if group == "update":
+        if group == RouteGroup.UPDATE:
             return self.update_schema is not None
-        if group == "import" or key == "export_importable":
+        if group == RouteGroup.IMPORT or key == Route.EXPORT_IMPORTABLE:
             return (
                 self.enable_import
                 and self.import_model is not None
-                and (group == "import" or self.enable_export)
+                and (group == RouteGroup.IMPORT or self.enable_export)
             )
-        if group == "export":
+        if group == RouteGroup.EXPORT:
             return self.enable_export
         return True
 
-    def route_dependencies(self, key: str) -> list[Any]:
+    def route_dependencies(self, key: Route) -> list[Any]:
         config = self.route_config_for(key)
         dependencies = [Depends(dependency) for dependency in config.dependencies]
         if self.public:
@@ -278,7 +278,7 @@ class BaseAPI:
         roles = config.roles if config.roles is not None else self.roles
         permissions = config.permissions
         if permissions is None and self.permission_prefix:
-            permissions = [f"{self.permission_prefix}:{ROUTE_GROUPS[key]}"]
+            permissions = [permission(self.permission_prefix, ROUTE_GROUPS[key])]
         dependencies.append(Depends(RoleRequired(*roles) if roles else get_current_user))
         if permissions:
             dependencies.append(Depends(PermissionRequired(*permissions)))
@@ -310,12 +310,14 @@ class BaseAPI:
         file.file.seek(0)
         limit_mb = self.import_max_file_size_mb
         if limit_mb and size > limit_mb * 1024 * 1024:
-            raise CustomException(http_code=413, message=f"File too large: max {limit_mb} MB")
+            raise CustomException(
+                ExceptionType.PAYLOAD_TOO_LARGE, f"File too large: max {limit_mb} MB"
+            )
         if not size:
             raise CustomException(ExceptionType.BAD_REQUEST, "Empty file")
         return file.file
 
-    def _filename(self, suffix: str = "", extension: str = "xlsx") -> str:
+    def _filename(self, suffix: str = "", extension: ExportFormat = ExportFormat.XLSX) -> str:
         table = self.service.model.__tablename__
         return f"{table}{suffix}_{datetime.now(UTC):%Y%m%d_%H%M%S}.{extension}"
 
@@ -397,7 +399,7 @@ class BaseAPI:
         }
 
     # =============================================================== create
-    def _create(self) -> tuple[Callable, dict]:
+    def _create_one(self) -> tuple[Callable, dict]:
         service_cls, create_schema = self.service, self.create_schema
 
         def create(payload: create_schema, service: Annotated[service_cls, Depends()]) -> Any:
@@ -534,7 +536,7 @@ class BaseAPI:
         }
 
     # =============================================================== export
-    def _export(self) -> tuple[Callable, dict]:
+    def _export_data(self) -> tuple[Callable, dict]:
         service_cls = self.service
 
         def export(
@@ -548,17 +550,18 @@ class BaseAPI:
                 ),
             ] = None,
             file_format: Annotated[
-                Literal["xlsx", "csv"],
+                ExportFormat,
                 Query(
                     alias="format",
                     description="xlsx: built on disk then streamed. csv: streamed while rows are "
                     "read (first bytes immediately, best for very large exports)",
                 ),
-            ] = "xlsx",
+            ] = ExportFormat.XLSX,
         ) -> Response:
             headers, rows = service.export_data(spec, split_csv(fields), limit=self.export_limit)
-            if file_format == "csv":
-                return csv_streaming_response(headers, rows, self._filename(extension="csv"))
+            if file_format == ExportFormat.CSV:
+                filename = self._filename(extension=ExportFormat.CSV)
+                return csv_streaming_response(headers, rows, filename)
             return xlsx_file_response(headers, rows, self._filename())
 
         return export, {

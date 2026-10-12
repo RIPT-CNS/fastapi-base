@@ -29,30 +29,30 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import selectinload
 
+from app.utils.enums import FilterOperator as Op
+from app.utils.enums import LogicalOperator
 from app.utils.exception_handler import CustomException, ExceptionType
 
-OPERATORS = frozenset(
-    {
-        "eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in", "between",
-        "like", "not_like", "startswith", "endswith", "isnull",
-    }
-)  # fmt: skip
-_LIST_OPERATORS = frozenset({"in", "not_in", "between"})
-_TEXT_OPERATORS = frozenset({"like", "not_like", "startswith", "endswith"})
+_LIST_OPERATORS = frozenset({Op.IN, Op.NOT_IN, Op.BETWEEN})
+_TEXT_OPERATORS = frozenset({Op.LIKE, Op.NOT_LIKE, Op.STARTSWITH, Op.ENDSWITH})
 MAX_PATH_DEPTH = 4
 
 
 # ------------------------------------------------------------------- nodes
 @dataclass
 class Condition:
+    """Condition("price", Op.GTE, 10), Condition("owner.email", Op.ENDSWITH, "@x.vn")"""
+
     field: str
-    op: str
+    op: Op
     value: Any
 
 
 @dataclass
 class Group:
-    kind: str  # "and" | "or"
+    """Group(LogicalOperator.OR, [Condition(...), Condition(...)])"""
+
+    kind: LogicalOperator  # AND | OR
     items: list["Condition | Group | Not"]
 
 
@@ -83,12 +83,19 @@ def _bad_request(message: str) -> CustomException:
 
 
 # ----------------------------------------------------------------- parsing
-def split_key(key: str) -> tuple[str, str]:
-    """'price__gte' -> ('price', 'gte'); 'name' -> ('name', 'eq')."""
+def _operator(value: Any) -> Op:
+    try:
+        return Op(value)
+    except ValueError as e:
+        raise _bad_request(f"Unknown filter operator '{value}'. Valid: {', '.join(Op)}") from e
+
+
+def split_key(key: str) -> tuple[str, Op]:
+    """'price__gte' -> ('price', Op.GTE); 'name' -> ('name', Op.EQ)."""
     name, sep, op = key.rpartition("__")
-    if sep and op in OPERATORS:
-        return name, op
-    return key, "eq"
+    if sep and op in Op:
+        return name, Op(op)
+    return key, Op.EQ
 
 
 def _parse_node(raw: Any) -> FilterNode:
@@ -97,20 +104,18 @@ def _parse_node(raw: Any) -> FilterNode:
     if not isinstance(raw, Mapping):
         raise _bad_request(f"Invalid filter node: {raw!r}")
     if "field" in raw:
-        op = raw.get("op", "eq")
-        if op not in OPERATORS:
-            raise _bad_request(f"Unknown filter operator '{op}'. Valid: {sorted(OPERATORS)}")
-        return Condition(str(raw["field"]), op, raw.get("value"))
-    for kind in ("and", "or"):
+        return Condition(str(raw["field"]), _operator(raw.get("op", Op.EQ)), raw.get("value"))
+    for kind in (LogicalOperator.AND, LogicalOperator.OR):
         if kind in raw:
             items = raw[kind]
             if not isinstance(items, list) or not items:
                 raise _bad_request(f"'{kind}' must be a non-empty list")
             return Group(kind, [_parse_node(item) for item in items])
-    if "not" in raw:
-        return Not(_parse_node(raw["not"]))
+    if LogicalOperator.NOT in raw:
+        return Not(_parse_node(raw[LogicalOperator.NOT]))
     # {"price__gte": 10, "name": "x"}
-    return Group("and", [Condition(*split_key(key), value) for key, value in raw.items()])
+    conditions = [Condition(*split_key(key), value) for key, value in raw.items()]
+    return Group(LogicalOperator.AND, conditions)
 
 
 def parse_filters(raw: Any) -> list[FilterNode]:
@@ -193,51 +198,51 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _column_condition(column: Any, op: str, value: Any, path: str) -> ColumnElement:
+def _column_condition(column: Any, op: Op, value: Any, path: str) -> ColumnElement:
     is_array = isinstance(column.type, ARRAY)
-    if op == "isnull":
+    if op == Op.ISNULL:
         return column.is_(None) if _as_bool(value, path) else column.is_not(None)
     if op in _TEXT_OPERATORS:
         text = _escape_like(str(value))
-        pattern = {"startswith": f"{text}%", "endswith": f"%{text}"}.get(op, f"%{text}%")
+        pattern = {Op.STARTSWITH: f"{text}%", Op.ENDSWITH: f"%{text}"}.get(op, f"%{text}%")
         condition = cast(column, String).ilike(pattern, escape="\\")
-        return ~condition if op == "not_like" else condition
+        return ~condition if op == Op.NOT_LIKE else condition
 
     python_type = column_python_type(column)
     if op in _LIST_OPERATORS:
         values = [_coerce(python_type, item, path) for item in _as_list(value)]
-        if op == "between":
+        if op == Op.BETWEEN:
             if len(values) != 2:
                 raise _bad_request(f"'between' on '{path}' needs exactly 2 values")
             return column.between(*values)
         if is_array:
-            return column.overlap(values) if op == "in" else ~column.overlap(values)
-        return column.in_(values) if op == "in" else column.not_in(values)
+            return column.overlap(values) if op == Op.IN else ~column.overlap(values)
+        return column.in_(values) if op == Op.IN else column.not_in(values)
 
     value = _coerce(python_type, value, path)
     if is_array:
-        if op == "eq":
+        if op == Op.EQ:
             return column.contains([value])
-        if op == "ne":
+        if op == Op.NE:
             return ~column.contains([value])
         raise _bad_request(f"Operator '{op}' is not supported on list field '{path}'")
     match op:
-        case "eq":
+        case Op.EQ:
             return column == value
-        case "ne":
+        case Op.NE:
             return column != value
-        case "gt":
+        case Op.GT:
             return column > value
-        case "gte":
+        case Op.GTE:
             return column >= value
-        case "lt":
+        case Op.LT:
             return column < value
-        case "lte":
+        case Op.LTE:
             return column <= value
     raise _bad_request(f"Unknown filter operator '{op}'")
 
 
-def _path_condition(model: type, parts: list[str], op: str, value: Any, path: str) -> ColumnElement:
+def _path_condition(model: type, parts: list[str], op: Op, value: Any, path: str) -> ColumnElement:
     name, rest = parts[0], parts[1:]
     mapper = sa_inspect(model)
     if name in _hidden(model):
@@ -246,7 +251,7 @@ def _path_condition(model: type, parts: list[str], op: str, value: Any, path: st
         relationship = mapper.relationships[name]
         attribute = getattr(model, name)
         if not rest:
-            if op != "isnull":
+            if op != Op.ISNULL:
                 raise _bad_request(f"'{path}' is a relation: filter on a sub-field, e.g. {path}.id")
             exists = attribute.any() if relationship.uselist else attribute.has()
             return ~exists if _as_bool(value, path) else exists
@@ -263,14 +268,14 @@ def build_condition(model: type, node: FilterNode) -> ColumnElement:
     if isinstance(node, Not):
         return not_(build_condition(model, node.item))
     conditions = [build_condition(model, item) for item in node.items]
-    return and_(*conditions) if node.kind == "and" else or_(*conditions)
+    return and_(*conditions) if node.kind == LogicalOperator.AND else or_(*conditions)
 
 
 def build_search(model: type, text: str, fields: Sequence[str]) -> ColumnElement | None:
     text = text.strip()
     if not text or not fields:
         return None
-    return or_(*(_path_condition(model, _check_path(path), "like", text, path) for path in fields))
+    return or_(*(_path_condition(model, _check_path(path), Op.LIKE, text, path) for path in fields))
 
 
 def default_search_fields(model: type) -> list[str]:

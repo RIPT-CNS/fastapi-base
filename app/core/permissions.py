@@ -11,14 +11,22 @@ so name roles here exactly like in Keycloak.
 
 from collections.abc import Iterable
 
-from app.utils.enums import UserRole
+from app.utils.enums import RouteGroup, UserRole
+
+ALL_PERMISSIONS = "*"
+
+
+def permission(resource: str, action: RouteGroup | str) -> str:
+    """permission("product", RouteGroup.READ) -> "product:read"."""
+    return f"{resource}:{action}"
+
 
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
-    UserRole.ADMIN: frozenset({"*"}),
+    UserRole.ADMIN: frozenset({ALL_PERMISSIONS}),
     UserRole.USER: frozenset(),
     UserRole.GUEST: frozenset(),
     # Example: a role that may view (but not modify) users
-    # "manager": frozenset({"user:read"}),
+    # "manager": frozenset({permission("user", RouteGroup.READ)}),
 }
 
 
@@ -29,9 +37,9 @@ def get_permissions(roles: Iterable[str]) -> set[str]:
     return permissions
 
 
-def has_permission(roles: Iterable[str], permission: str) -> bool:
+def has_permission(roles: Iterable[str], required: str) -> bool:
     granted = get_permissions(roles)
-    if "*" in granted or permission in granted:
+    if ALL_PERMISSIONS in granted or required in granted:
         return True
-    resource = permission.split(":", 1)[0]
-    return f"{resource}:*" in granted
+    resource = required.split(":", 1)[0]
+    return permission(resource, ALL_PERMISSIONS) in granted

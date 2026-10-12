@@ -17,12 +17,13 @@ from app.core.config import BASE_DIR, settings
 from app.core.database import SessionLocal
 from app.core.logging import setup_logging
 from app.services.srv_user import UserService
+from app.utils.enums import Environment
 
 logger = logging.getLogger("app.cli")
 
 
 def serve() -> None:
-    reload = settings.ENVIRONMENT == "dev"
+    reload = settings.ENVIRONMENT == Environment.DEV
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

@@ -46,9 +46,10 @@ from sqlalchemy import inspect as sa_inspect
 from app.core.config import settings
 from app.core.database import DbSession
 from app.models.model_base import BareBaseModel, SoftDeleteMixin
-from app.schemas.sche_base import ImportMode, ImportResult, ImportRowError, PaginationParams
+from app.schemas.sche_base import ImportResult, ImportRowError, PaginationParams
 from app.schemas.sche_response import MetadataResponse
 from app.utils import excel
+from app.utils.enums import ImportMode
 from app.utils.exception_handler import CustomException, ExceptionType
 from app.utils.paging import paginate
 from app.utils.query_builder import (

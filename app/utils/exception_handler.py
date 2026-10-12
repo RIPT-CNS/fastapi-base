@@ -23,6 +23,7 @@ class ExceptionType(enum.Enum):
     FORBIDDEN = 403, "Don't have access rights to the content"
     NOT_FOUND = 404, "Resource not found"
     CONFLICT = 409, "Resource already exists"
+    PAYLOAD_TOO_LARGE = 413, "Payload too large"
     UNPROCESSABLE_ENTITY = 422, "Validation error"
     INTERNAL_SERVER_ERROR = 500, "Something went wrong"
     SERVICE_UNAVAILABLE = 503, "Service unavailable"

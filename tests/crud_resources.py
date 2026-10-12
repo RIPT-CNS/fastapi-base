@@ -12,6 +12,7 @@ from app.core.base_api import BaseAPI, BasePublicAPI, RouteConfig
 from app.models import BareBaseModel, SoftDeleteMixin
 from app.schemas.sche_base import BaseModelResponse, BaseSchema
 from app.services.srv_base import BaseService, ImportContext, ImportRow
+from app.utils.enums import Route, RouteGroup, UserRole
 
 
 # ------------------------------------------------------------------ models
@@ -119,9 +120,9 @@ class ItemAPI(BaseAPI):
     update_schema = ItemUpdate
     import_schema = ItemImport
     route_config = {
-        "read": RouteConfig(auth=False),
-        "export": RouteConfig(auth=False),
-        "delete": RouteConfig(roles=["admin"]),
+        RouteGroup.READ: RouteConfig(auth=False),
+        RouteGroup.EXPORT: RouteConfig(auth=False),
+        RouteGroup.DELETE: RouteConfig(roles=[UserRole.ADMIN]),
     }
 
 
@@ -132,7 +133,7 @@ class AdminItemAPI(BaseAPI):
     service = ItemService
     response_schema = ItemResponse
     create_schema = ItemCreate
-    roles = ["admin"]
+    roles = [UserRole.ADMIN]
     enable_import = False
     enable_export = False
 
@@ -143,7 +144,7 @@ class CategoryAPI(BasePublicAPI):
     response_schema = CategoryResponse
     create_schema = CategorySchema
     update_schema = CategorySchema
-    disabled_routes = ("delete_all", "import")
+    disabled_routes = (Route.DELETE_ALL, RouteGroup.IMPORT)
 
 
 TEST_APIS = (ItemAPI, AdminItemAPI, CategoryAPI)

@@ -1,6 +1,7 @@
 from app.core.base_api import BaseAPI
 from app.schemas.sche_user import UserBaseResponse, UserCreateRequest, UserUpdateRequest
 from app.services.srv_user import UserService
+from app.utils.enums import Route
 
 
 class UserAPI(BaseAPI):
@@ -15,4 +16,4 @@ class UserAPI(BaseAPI):
     import_key = "username"
     permission_prefix = "user"
     # Full replace (PUT) makes no sense for accounts: use PATCH
-    disabled_routes = ("update_one", "update_many", "update_all")
+    disabled_routes = (Route.UPDATE_ONE, Route.UPDATE_MANY, Route.UPDATE_ALL)

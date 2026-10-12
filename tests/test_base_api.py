@@ -208,3 +208,23 @@ def test_public_api_and_disabled_routes(client):
     assert "/api/test-admin-items/export" not in paths  # enable_export = False
     # no update_schema -> no PUT/PATCH routes
     assert set(paths["/api/test-admin-items/{item_id}"]) == {"get", "delete"}
+
+
+def test_route_keys_never_shadow_groups():
+    from app.core.base_api import ROUTE_GROUPS, BaseAPI, RouteConfig
+    from app.utils.enums import Route, RouteGroup
+    from tests.crud_resources import ItemCreate, ItemResponse, ItemService
+
+    assert not set(Route) & set(RouteGroup)
+    assert set(ROUTE_GROUPS) == set(Route)
+
+    class OnlyCreateOneIsAdmin(BaseAPI):
+        prefix = "/x"
+        service = ItemService
+        response_schema = ItemResponse
+        create_schema = ItemCreate
+        route_config = {Route.CREATE_ONE: RouteConfig(roles=["admin"])}
+
+    api = OnlyCreateOneIsAdmin()
+    assert api.route_config_for(Route.CREATE_ONE).roles == ["admin"]
+    assert api.route_config_for(Route.CREATE_MANY).roles is None

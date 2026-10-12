@@ -1,10 +1,10 @@
 from datetime import datetime
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import settings
+from app.utils.enums import ImportMode
 
 
 class BaseSchema(BaseModel):
@@ -26,12 +26,6 @@ class PaginationParams(BaseModel):
 
 class BulkResult(BaseModel):
     count: int = Field(description="Number of affected records")
-
-
-class ImportMode(StrEnum):
-    INSERT = "insert"  # every row is a new record
-    UPDATE = "update"  # every row must match an existing record by the import key
-    UPSERT = "upsert"  # update when the key matches, insert otherwise
 
 
 class ImportRowError(BaseModel):

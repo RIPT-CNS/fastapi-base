@@ -170,6 +170,7 @@ class ProductService(BaseService[Product, ProductCreateRequest, ProductUpdateReq
 from app.core.base_api import BaseAPI, RouteConfig
 from app.schemas.sche_product import ProductCreateRequest, ProductResponse, ProductUpdateRequest
 from app.services.srv_product import ProductService
+from app.utils.enums import RouteGroup
 
 
 class ProductAPI(BaseAPI):
@@ -180,7 +181,7 @@ class ProductAPI(BaseAPI):
     create_schema = ProductCreateRequest
     update_schema = ProductUpdateRequest
     permission_prefix = "product"                       # product:read / create / update / ...
-    route_config = {"read": RouteConfig(auth=False)}    # các API đọc: public
+    route_config = {RouteGroup.READ: RouteConfig(auth=False)}   # các API đọc: public
 ```
 
 **5. Migration**
@@ -202,7 +203,7 @@ Kết quả: 22 API ở `/api/v1/products` (và alias `/api/products` vì `API_V
 | `get_first` | `GET /products/first` (bản ghi đầu tiên khớp query) | read |
 | `get_one` | `GET /products/{id}` | read |
 | `count` | `GET /products/count` | read |
-| `create` / `create_many` | `POST /products` / `POST /products/many` (body: list) | create |
+| `create_one` / `create_many` | `POST /products` / `POST /products/many` (body: list) | create |
 | `update_one` / `patch_one` | `PUT` / `PATCH /products/{id}` | update |
 | `update_many` / `patch_many` | `PUT` / `PATCH /products/many` (body: `[{"id": 1, ...}, ...]`) | update |
 | `update_all` / `patch_all` | `PUT` / `PATCH /products/all?<filter>` (cùng giá trị cho mọi bản ghi khớp) | update |
@@ -210,7 +211,7 @@ Kết quả: 22 API ở `/api/v1/products` (và alias `/api/products` vì `API_V
 | `import_template` | `GET /products/import/template` | import |
 | `import_validate` | `POST /products/import/validate?mode=` (chỉ kiểm tra, không ghi) | import |
 | `import_data` | `POST /products/import?mode=insert\|update\|upsert` | import |
-| `export` | `GET /products/export?fields=&format=xlsx\|csv` | export |
+| `export_data` | `GET /products/export?fields=&format=xlsx\|csv` | export |
 | `export_importable` | `GET /products/export/importable` (định dạng nhập lại được) | export |
 
 - `PUT` ghi **toàn bộ** field của `update_schema` (field không gửi về giá trị mặc định); `PATCH` chỉ ghi field có gửi.
@@ -257,7 +258,7 @@ GET /products?sort=-price,name                                     # "-" = giả
 | `import_schema` | `create_schema` | **ghi đè model dữ liệu import** (cột Excel + validate) |
 | `import_key` | `"id"` | cột để khớp bản ghi khi import update/upsert (id hoặc cột unique, vd. `sku`) |
 | `enable_import` / `enable_export` | `True` | bật/tắt import, export Excel |
-| `disabled_routes` | `()` | tắt route theo key hoặc theo nhóm: `("delete_all", "import")` |
+| `disabled_routes` | `()` | tắt route theo key hoặc theo nhóm: `(Route.DELETE_ALL, RouteGroup.IMPORT)` |
 | `auth_required` | `True` | auth cho **cả model** |
 | `roles` | `None` | role cho **cả model** (có 1 trong các role); `None` = chỉ cần đăng nhập |
 | `permission_prefix` | `None` | yêu cầu permission `<prefix>:<nhóm>` |
@@ -267,19 +268,32 @@ GET /products?sort=-price,name                                     # "-" = giả
 ```python
 class ProductAPI(BaseAPI):
     ...
-    roles = ["admin", "manager"]                     # mặc định cho cả model
-    disabled_routes = ("delete_all",)
+    roles = [UserRole.ADMIN, "manager"]                    # mặc định cho cả model
+    disabled_routes = (Route.DELETE_ALL,)
     route_config = {
-        "read": RouteConfig(auth=False),             # nhóm read: public
-        "export": RouteConfig(roles=["admin", "manager", "viewer"]),
-        "delete_one": RouteConfig(roles=["admin"]),  # riêng 1 API
-        "import": RouteConfig(permissions=["product:import"]),
-        "create": RouteConfig(dependencies=[check_quota]),  # dependency tuỳ ý
-        "update_all": RouteConfig(enabled=False),
+        RouteGroup.READ: RouteConfig(auth=False),          # nhóm read: public
+        RouteGroup.EXPORT: RouteConfig(roles=[UserRole.ADMIN, "manager", "viewer"]),
+        Route.DELETE_ONE: RouteConfig(roles=[UserRole.ADMIN]),  # riêng 1 API
+        RouteGroup.IMPORT: RouteConfig(permissions=[permission("product", RouteGroup.IMPORT)]),
+        Route.CREATE_ONE: RouteConfig(dependencies=[check_quota]),  # dependency tuỳ ý
+        Route.UPDATE_ALL: RouteConfig(enabled=False),
     }
 ```
 
-`RouteConfig(enabled, auth, roles, permissions, dependencies)`: giá trị `None` = kế thừa cấu hình của class.
+`RouteConfig(enabled, auth, roles, permissions, dependencies)`: giá trị `None` = kế thừa cấu hình của class. Cấu hình theo `Route` (1 API) được ưu tiên hơn theo `RouteGroup` (cả nhóm).
+
+**Hằng số / enum** — mọi tuỳ chọn cố định nằm ở `app/utils/enums.py` (`StrEnum`, so sánh bằng với chuỗi tương ứng nên chuỗi cũ vẫn chạy, nhưng nên dùng enum để IDE gợi ý và bắt lỗi chính tả):
+
+| Enum | Giá trị |
+| --- | --- |
+| `Route` | key của 22 API: `GET_PAGE`, `CREATE_ONE`, `PATCH_MANY`, `DELETE_ALL`, `EXPORT_DATA`, ... |
+| `RouteGroup` | `READ`, `CREATE`, `UPDATE`, `DELETE`, `IMPORT`, `EXPORT` (cũng là phần action của permission) |
+| `FilterOperator`, `LogicalOperator` | toán tử filter; `AND`, `OR`, `NOT` |
+| `ImportMode`, `ExportFormat` | `INSERT`/`UPDATE`/`UPSERT`; `XLSX`/`CSV` |
+| `QueryParam` | tên query param dành riêng (`page`, `sort`, `filters`, ...) |
+| `UserRole`, `AuthProvider`, `Environment` | role; `LOCAL`/`KEYCLOAK`; `DEV`/`TEST`/`STAGING`/`PROD` |
+
+Permission: `permission("product", RouteGroup.READ)` → `"product:read"`, `ALL_PERMISSIONS` = `"*"` (`app/core/permissions.py`).
 
 **BasePublicAPI**: kế thừa `BaseAPI` nhưng bỏ hoàn toàn auth và role, mọi route đều public:
 
@@ -394,7 +408,7 @@ Dùng trong endpoint tự viết: `service: Annotated[ProductService, Depends()]
 | `build_query(q)` → `Select` để tự viết tiếp | `delete(obj, hard=False)`, `delete_by_id`, `delete_many(ids)`, `delete_all(q)` |
 | `export_data(q, fields)` → `(headers, rows)` (rows đọc dần) | `import_excel(file, schema=, mode=)` |
 
-`q` nhận `QuerySpec`, dict viết tắt hoặc list JSON y như API: `service.get_list({"price__gte": 10, "category.name": "fruit"})`. Mọi hàm ghi có `commit=False` để gộp nhiều thao tác trong 1 transaction.
+`q` nhận `QuerySpec`, dict viết tắt hoặc list JSON y như API: `service.get_list({"price__gte": 10, "category.name": "fruit"})`, hoặc dựng bằng enum: `QuerySpec(filters=[Condition("price", FilterOperator.GTE, 10), Group(LogicalOperator.OR, [...])], sort=["-price"])` (`app.utils.query_builder`). Mọi hàm ghi có `commit=False` để gộp nhiều thao tác trong 1 transaction.
 
 Hook nghiệp vụ: `before_create(data) -> data`, `after_create(obj)`, `before_update(obj, data) -> data`, `after_update(obj)`, `before_delete(obj)`, `after_delete(obj)`. Override `get_query()` để thêm join/eager-load hoặc lọc theo dòng — áp dụng cho mọi API đọc, bulk, export.
 
@@ -495,8 +509,11 @@ Map role → permission ở `app/core/permissions.py`:
 
 ```python
 ROLE_PERMISSIONS = {
-    UserRole.ADMIN: frozenset({"*"}),                           # mọi quyền
-    "manager": frozenset({"product:*", "user:read"}),
+    UserRole.ADMIN: frozenset({ALL_PERMISSIONS}),               # mọi quyền
+    "manager": frozenset({
+        permission("product", ALL_PERMISSIONS),                 # product:*
+        permission("user", RouteGroup.READ),                    # user:read
+    }),
 }
 ```
 
