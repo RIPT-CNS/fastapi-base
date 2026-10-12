@@ -12,7 +12,6 @@
 .venv
 venv
 mount-data
-docker
 docker-compose*.yml
 Dockerfile
 Makefile

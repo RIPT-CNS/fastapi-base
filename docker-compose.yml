@@ -21,6 +21,9 @@ x-app: &app
     POSTGRES_PORT: 5432
   volumes:
     - .:/app
+  # Lets the containers reach services on the host (e.g. a local Keycloak) via host.docker.internal
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   logging: *logging
 
 services:
@@ -31,10 +34,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-app}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      KEYCLOAK_DB_NAME: ${KEYCLOAK_DB_NAME:-keycloak}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     ports:
       - "${DB_BIND:-127.0.0.1}:${DB_PORT:-5432}:5432"
     healthcheck:
@@ -73,53 +74,6 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 3
-
-  # Started only when COMPOSE_PROFILES contains "keycloak"
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.7.5
-    profiles: ["keycloak"]
-    command: ["${KEYCLOAK_MODE:-start-dev}", "--import-realm"]
-    restart: unless-stopped
-    environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
-      KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://db:5432/${KEYCLOAK_DB_NAME:-keycloak}
-      KC_DB_USERNAME: ${POSTGRES_USER:-postgres}
-      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      # Fixed public URL = token issuer; backchannel (from the app container) stays dynamic
-      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}
-      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
-      KC_HTTP_ENABLED: "true"
-      KC_PROXY_HEADERS: xforwarded
-      KC_HEALTH_ENABLED: "true"
-      # Placeholders used by docker/keycloak/realm.json
-      REALM_NAME: ${KEYCLOAK_REALM:-fastapi-base}
-      REALM_BACKEND_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-fastapi-backend}
-      REALM_BACKEND_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-fastapi-backend-secret}
-      REALM_FRONTEND_CLIENT_ID: ${KEYCLOAK_FRONTEND_CLIENT_ID:-fastapi-frontend}
-      REALM_APP_URL: ${APP_PUBLIC_URL:-http://localhost:8000}
-      REALM_FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      REALM_DEMO_PASSWORD: ${KEYCLOAK_DEMO_PASSWORD:-Demo@123}
-    volumes:
-      - ./docker/keycloak:/opt/keycloak/data/import:ro
-    ports:
-      - "${KEYCLOAK_PORT:-8080}:8080"
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          exec 3<>/dev/tcp/127.0.0.1/9000 &&
-          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
-          grep -q '"UP"' <&3
-      interval: 10s
-      timeout: 5s
-      start_period: 60s
-      retries: 12
-    logging: *logging
 
 volumes:
   pg_data:

@@ -2,7 +2,7 @@
 
 Backend base: **FastAPI + PostgreSQL + SQLAlchemy 2 + Alembic + Keycloak**, chạy hoàn toàn bằng Docker.
 
-- **Một lệnh là chạy đủ**: PostgreSQL, Keycloak (đã có sẵn realm/client/role/user demo), migration, tạo admin, API (hot reload).
+- **Một lệnh là chạy đủ**: PostgreSQL, migration, tạo admin, API (hot reload). Keycloak dùng server có sẵn bên ngoài.
 - **Gọn**: 1 `Dockerfile`, 1 `docker-compose.yml`, 1 `requirements.txt`. Dev hay prod chỉ khác nhau ở `.env`.
 - **Xác thực**: JWT local (access + refresh, thu hồi token), HTTP Basic, SSO Keycloak (verify JWT offline qua JWKS, tự tạo user lần đầu đăng nhập).
 - **Phân quyền**: theo role (local + role từ Keycloak) và theo permission (`resource:action`, có wildcard).
@@ -20,13 +20,11 @@ docker compose up -d --build   # hoặc: make up
 | --- | --- | --- |
 | Swagger UI | http://localhost:8000/docs | |
 | API | http://localhost:8000/api | admin / `Admin@123` (local) |
-| Keycloak admin | http://localhost:8080 | admin / admin |
-| Realm `fastapi-base` | | sso-admin, sso-user / `Demo@123` |
 | PostgreSQL | localhost:5432 | postgres / postgres |
 
-Cổng host đổi trong `.env`: `APP_PORT`, `KEYCLOAK_PORT`, `DB_PORT`.
+Cổng host đổi trong `.env`: `APP_PORT`, `DB_PORT`. Trỏ tới Keycloak của bạn bằng các biến `KEYCLOAK_*` (xem [Keycloak SSO](#keycloak-sso)); không dùng SSO thì đặt `KEYCLOAK_ENABLED=false`.
 
-Thứ tự khởi động: `db` (healthy) → `migrate` (`alembic upgrade head` + tạo admin, rồi thoát) → `app`. `keycloak` chạy song song (khi `COMPOSE_PROFILES=keycloak`), app không phụ thuộc Keycloak lúc khởi động.
+Thứ tự khởi động: `db` (healthy) → `migrate` (`alembic upgrade head` + tạo admin, rồi thoát) → `app`. App không gọi Keycloak lúc khởi động.
 
 Trong Swagger, nút **Authorize** có 4 cách: `LocalLogin` (username/password), `KeycloakSSO` (đăng nhập qua trang Keycloak), `BearerToken` (dán token), `BasicAuth`.
 
@@ -58,9 +56,6 @@ Trong Swagger, nút **Authorize** có 4 cách: `LocalLogin` (username/password),
 │   ├── cli.py                  # python -m app.cli serve | migrate | seed | create-user
 │   └── main.py
 ├── alembic/versions            # migration
-├── docker
-│   ├── keycloak/realm.json     # realm import sẵn cho dev
-│   └── postgres/init           # tạo DB cho Keycloak
 ├── tests
 ├── .env.example                # MỌI cấu hình dev/prod
 ├── docker-compose.yml
@@ -77,8 +72,7 @@ Cùng một `Dockerfile`, `docker-compose.yml`, `requirements.txt`; chỉ khác 
 | --- | --- | --- |
 | `ENVIRONMENT` | `dev`: hot reload, 1 process | `prod`: `WEB_CONCURRENCY` worker, kiểm tra cấu hình khi khởi động |
 | `DEBUG` / `LOG_JSON` | `true` / `false` | `false` / `true` |
-| `COMPOSE_PROFILES` | `keycloak` (chạy Keycloak kèm realm demo) | để trống nếu dùng Keycloak bên ngoài |
-| `KEYCLOAK_SERVER_URL` / `KEYCLOAK_PUBLIC_URL` | `http://keycloak:8080` / `http://localhost:8080` | `https://sso.example.com` |
+| `KEYCLOAK_SERVER_URL` / `KEYCLOAK_PUBLIC_URL` | Keycloak dev/test | `https://sso.example.com` |
 | `DB_BIND` | `127.0.0.1` | `127.0.0.1` (DB không lộ ra ngoài) |
 
 Các dòng cần đổi khi lên prod được đánh dấu `[PROD]` trong `.env.example`. Khi `ENVIRONMENT=prod`, app **từ chối khởi động** nếu `SECRET_KEY` ngắn hơn 32 ký tự hoặc chứa `change-me`, hoặc `DEBUG=true`. Tối thiểu:
@@ -91,7 +85,6 @@ SECRET_KEY=<openssl rand -hex 32>
 POSTGRES_PASSWORD=<mạnh>
 FIRST_SUPERUSER_PASSWORD=<mạnh>     # hoặc để trống để không tạo admin
 BACKEND_CORS_ORIGINS=https://app.example.com
-COMPOSE_PROFILES=                   # Keycloak bên ngoài
 KEYCLOAK_SERVER_URL=https://sso.example.com
 KEYCLOAK_PUBLIC_URL=https://sso.example.com
 KEYCLOAK_CLIENT_SECRET=<secret của client>
@@ -99,11 +92,9 @@ KEYCLOAK_CLIENT_SECRET=<secret của client>
 
 Code được mount vào container (`.:/app`) ở mọi môi trường: cập nhật prod bằng `git pull && docker compose up -d --build` (chạy lại migrate + restart app). Muốn image bất biến (đẩy lên registry) thì bỏ dòng `volumes: - .:/app` trong `docker-compose.yml`.
 
-Muốn tự host Keycloak ở prod: giữ `COMPOSE_PROFILES=keycloak`, đặt `KEYCLOAK_MODE=start`, `KEYCLOAK_PUBLIC_URL=https://sso...`, đổi `KEYCLOAK_ADMIN_PASSWORD`, `KEYCLOAK_DEMO_PASSWORD` (hoặc xoá user demo sau khi import), và đặt reverse proxy HTTPS phía trước.
-
 Đặt reverse proxy (nginx/traefik) có TLS phía trước app; uvicorn đã bật proxy headers.
 
-Chạy không dùng Docker: `pip install -r requirements.txt`, trong `.env` sửa `POSTGRES_HOST=localhost`, `POSTGRES_PORT=<DB_PORT>`, `KEYCLOAK_SERVER_URL=http://localhost:<KEYCLOAK_PORT>`, rồi `python -m app.cli migrate && python -m app.cli serve`.
+Chạy không dùng Docker: `pip install -r requirements.txt`, trong `.env` sửa `POSTGRES_HOST=localhost`, `POSTGRES_PORT=<DB_PORT>`, `KEYCLOAK_SERVER_URL` trỏ thẳng tới Keycloak, rồi `python -m app.cli migrate && python -m app.cli serve`.
 
 ## Thêm một module mới
 
@@ -288,13 +279,29 @@ Các luồng đăng nhập Keycloak:
 | Username/password (Direct Access Grant) | `POST /api/auth/sso/login` |
 | Refresh / logout | `POST /api/auth/sso/refresh`, `POST /api/auth/sso/logout` |
 
-Realm demo (`docker/keycloak/realm.json`, chỉ import khi realm chưa tồn tại):
-- client `fastapi-backend` (confidential, có Direct Access Grant) và `fastapi-frontend` (public, PKCE, dùng cho Swagger/SPA); cả hai có audience mapper đưa `fastapi-backend` vào `aud`;
-- realm roles `admin`, `user`, `guest`; user `sso-admin` (admin) và `sso-user` (user).
+### Keycloak SSO
+
+Backend dùng Keycloak **có sẵn bên ngoài**. Cấu hình trong `.env`:
+
+| Biến | Ý nghĩa |
+| --- | --- |
+| `KEYCLOAK_SERVER_URL` | URL backend (trong container) gọi tới Keycloak: lấy JWKS, đổi token. Keycloak chạy trên chính máy này: `http://host.docker.internal:<port>` |
+| `KEYCLOAK_PUBLIC_URL` | URL trình duyệt dùng, cũng là `iss` trong token. Để trống nếu giống `KEYCLOAK_SERVER_URL` |
+| `KEYCLOAK_REALM` | tên realm |
+| `KEYCLOAK_CLIENT_ID` / `KEYCLOAK_CLIENT_SECRET` | client confidential của backend |
+| `KEYCLOAK_FRONTEND_CLIENT_ID` | client public (PKCE) cho Swagger/SPA |
+| `KEYCLOAK_AUDIENCE` | giá trị bắt buộc có trong `aud`; mặc định = `KEYCLOAK_CLIENT_ID` |
+
+`iss` của token phải đúng bằng `KEYCLOAK_PUBLIC_URL/realms/<realm>`, nếu không mọi request SSO sẽ bị 401. Kiểm tra bằng cách decode một access token (jwt.io) và so trường `iss`.
+
+Cần tạo trong realm của bạn:
+
+1. **Client backend** (vd. `fastapi-backend`): *Client authentication* = On (có secret). Bật *Standard flow*; bật *Direct access grants* nếu dùng `POST /auth/sso/login`. *Valid redirect URIs*: `http://localhost:8000/*` và domain frontend.
+2. **Client frontend** (vd. `fastapi-frontend`): *Client authentication* = Off, *Standard flow* = On, PKCE `S256`. *Valid redirect URIs*: `http://localhost:8000/docs/oauth2-redirect` (Swagger) và domain frontend; *Web origins*: `+`.
+3. **Audience mapper** trên cả hai client (*Client scopes → <client>-dedicated → Add mapper → Audience*): *Included Client Audience* = client backend, *Add to access token* = On. Thiếu mapper này, token không có `aud` của backend và bị từ chối.
+4. **Role**: tạo realm role (hoặc client role của backend) trùng tên với role trong `app/core/permissions.py`, vd. `admin`, `user`.
 
 Đăng nhập bằng Google/Microsoft/LDAP: cấu hình **Identity Provider / User Federation trong Keycloak**, backend không phải sửa gì.
-
-Trong Docker dev, backend gọi Keycloak qua `http://keycloak:8080` (`KEYCLOAK_SERVER_URL`), còn trình duyệt và issuer của token dùng `http://localhost:KEYCLOAK_PORT` (`KEYCLOAK_PUBLIC_URL`). Keycloak được cấu hình `KC_HOSTNAME` cố định + `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` để `iss` luôn khớp.
 
 ## Phân quyền
 
