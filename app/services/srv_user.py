@@ -39,7 +39,7 @@ class UserService(BaseService[User, UserCreateRequest, UserUpdateRequest]):
         """Change password and revoke every token issued before."""
         user.hashed_password = get_password_hash(password)
         user.token_version += 1
-        self._save(user, commit=True)
+        self._save(commit=True)
 
     # ------------------------------------------------------------------ hooks
     def import_transform_row(self, values: dict[str, Any], ctx: ImportContext) -> dict[str, Any]:
@@ -125,7 +125,7 @@ class UserService(BaseService[User, UserCreateRequest, UserUpdateRequest]):
 
         if user in self.db.new or self.db.is_modified(user):
             try:
-                self._save(user, commit=True)
+                self._save(commit=True)
             except IntegrityError:
                 # Another request created this user concurrently
                 self.db.rollback()

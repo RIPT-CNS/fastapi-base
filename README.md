@@ -210,7 +210,7 @@ Kết quả: 22 API ở `/api/v1/products` (và alias `/api/products` vì `API_V
 | `import_template` | `GET /products/import/template` | import |
 | `import_validate` | `POST /products/import/validate?mode=` (chỉ kiểm tra, không ghi) | import |
 | `import_data` | `POST /products/import?mode=insert\|update\|upsert` | import |
-| `export` | `GET /products/export?fields=` | export |
+| `export` | `GET /products/export?fields=&format=xlsx\|csv` | export |
 | `export_importable` | `GET /products/export/importable` (định dạng nhập lại được) | export |
 
 - `PUT` ghi **toàn bộ** field của `update_schema` (field không gửi về giá trị mặc định); `PATCH` chỉ ghi field có gửi.
@@ -262,7 +262,7 @@ GET /products?sort=-price,name                                     # "-" = giả
 | `roles` | `None` | role cho **cả model** (có 1 trong các role); `None` = chỉ cần đăng nhập |
 | `permission_prefix` | `None` | yêu cầu permission `<prefix>:<nhóm>` |
 | `route_config` | `{}` | cấu hình **từng API** (theo key) hoặc từng nhóm, ưu tiên key |
-| `list_limit`, `export_limit`, `import_max_rows`, `import_max_file_size_mb` | theo `.env` | giới hạn |
+| `list_limit`, `export_limit`, `import_max_rows`, `import_max_file_size_mb` | theo `.env` | giới hạn (`0` = không giới hạn) |
 
 ```python
 class ProductAPI(BaseAPI):
@@ -317,12 +317,12 @@ Mỗi bước là một hàm của service, ghi đè để tuỳ biến theo mod
 
 | Bước | Hàm | Dùng để |
 | --- | --- | --- |
-| Nhận dữ liệu | `import_read(content, ctx, max_rows)` | đọc file khác, map header khác |
+| Nhận dữ liệu | `import_read(source, ctx, max_rows)` | đọc file khác, map header khác |
 | | `import_transform_row(values, ctx)` | chuẩn hoá giá trị thô (trim, lower, đổi mã → id, ...) |
 | Validate | `import_validate(rows, ctx)` | toàn bộ quy trình validate |
 | | `import_validate_row(row, ctx)` → `{field: lỗi}` | rule nghiệp vụ từng dòng; được sửa `row.data` |
 | | `import_validate_unique(rows, ctx)` | kiểm tra trùng giữa các dòng |
-| Ghi DB | `import_save(rows, ctx, result)` / `import_save_row(row, ctx)` | cách ghi (mặc định dùng `create`/`update` nên chạy hook) |
+| Ghi DB | `import_save(rows, ctx, result)` / `import_save_row(row, ctx)` | cách ghi. Mặc định: chạy `before_*` từng dòng, ghi theo lô `import_batch_size` (1000), `after_*` chạy sau mỗi lô (đã có `id`) |
 
 Ví dụ: file import dùng **tên danh mục** thay vì id (`import_schema` riêng + đổi ở bước validate):
 
@@ -364,8 +364,23 @@ class ProductAPI(BaseAPI):
 - `GET /export?fields=id,name,category.name,tags,items&<filter/search/sort>`: chọn cột (mặc định mọi cột không ẩn), lọc như API đọc.
   - Cột thường, quan hệ 1 (`category.name`) → 1 cột giá trị; quan hệ 1 không chọn field con (`category`) → object JSON.
   - Quan hệ nhiều (`items`, `items.name`) và cột ARRAY → mảng JSON (`["a","b"]`).
-  - Quan hệ được nạp bằng `selectinload` (không N+1). Text bắt đầu bằng `=` không bao giờ thành công thức Excel.
+  - Quan hệ được nạp bằng `selectinload` (không N+1). Text bắt đầu bằng `=` không bao giờ thành công thức (xlsx: ô kiểu text, csv: thêm `'`).
 - `GET /export/importable`: cùng cột với file mẫu import (kèm `import_key`). Sửa file rồi import lại bằng `mode=update`/`upsert`.
+
+**Dữ liệu lớn**
+
+Export **không giới hạn số dòng** (`EXPORT_MAX_ROWS=0`). Dữ liệu được đọc từ DB theo lô 1000 dòng (server-side cursor), nên RAM gần như không đổi dù file lớn tới đâu.
+
+| | `format=xlsx` (mặc định) | `format=csv` |
+| --- | --- | --- |
+| Cách trả về | dựng file trên đĩa (file tạm), xong mới stream về client, rồi xoá file tạm | stream ngay khi đọc được dòng |
+| Byte đầu tiên | sau khi dựng xong toàn bộ | gần như tức thì |
+| Đo với 300.000 dòng | ~21s, 7,9 MB | byte đầu 0,4s, xong 8,7s, 21,7 MB |
+| Giới hạn | 1.048.576 dòng/sheet, vượt thì tự sang sheet `data_2`, `data_3`... | không |
+
+Export xlsx rất lớn có thể vượt timeout của reverse proxy (nginx mặc định 60s) vì client chưa nhận byte nào trong lúc dựng file. Khi đó tăng `proxy_read_timeout` hoặc dùng `format=csv` (file mở được bằng Excel, có BOM UTF-8 nên tiếng Việt hiển thị đúng).
+
+Import tối đa **100 MB** (`IMPORT_MAX_FILE_SIZE_MB`) và **100.000 dòng** (`IMPORT_MAX_ROWS`, `0` = không giới hạn). File upload được giữ trên đĩa, không nạp vào RAM. Vì cơ chế "tất cả hoặc không gì", mọi dòng được validate trong RAM (~1–2 KB/dòng) trước khi ghi, rồi ghi trong 1 transaction theo lô 1000 dòng. Đo được: 100.000 dòng ~17s, RAM +75 MB. Muốn nhận file lớn cần tăng giới hạn của reverse proxy (nginx: `client_max_body_size 100m;`, `proxy_read_timeout`).
 
 ### BaseService
 
@@ -377,6 +392,7 @@ Dùng trong endpoint tự viết: `service: Annotated[ProductService, Depends()]
 | `get_first(q)`, `get_list(q, limit)`, `get_page(q, pagination)`, `count(q)` | `update(obj, data, partial=True)`, `update_by_id`, `partial_update_by_id` |
 | `get_many(ids)` | `update_many(items, partial)`, `update_all(q, data, partial)` |
 | `build_query(q)` → `Select` để tự viết tiếp | `delete(obj, hard=False)`, `delete_by_id`, `delete_many(ids)`, `delete_all(q)` |
+| `export_data(q, fields)` → `(headers, rows)` (rows đọc dần) | `import_excel(file, schema=, mode=)` |
 
 `q` nhận `QuerySpec`, dict viết tắt hoặc list JSON y như API: `service.get_list({"price__gte": 10, "category.name": "fruit"})`. Mọi hàm ghi có `commit=False` để gộp nhiều thao tác trong 1 transaction.
 

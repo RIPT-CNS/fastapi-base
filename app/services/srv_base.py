@@ -13,8 +13,8 @@ Override points:
     import_read -> import_transform_row        step 1: receive data
     import_validate -> import_validate_row     step 2: validate (+ import_validate_unique)
     import_save -> import_save_row             step 3: write to the database
-    export_fields / export_value               export
-    import_export_value                        export in the import format
+    export_fields / export_value               export (export_data)
+    import_export_value                        export in the import format (export_importable_data)
 """
 
 import json
@@ -25,7 +25,18 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from functools import lru_cache
-from typing import Annotated, Any, ClassVar, Generic, Literal, TypeVar, Union, get_args, get_origin
+from typing import (
+    Annotated,
+    Any,
+    BinaryIO,
+    ClassVar,
+    Generic,
+    Literal,
+    TypeVar,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from pydantic import BaseModel, ValidationError, create_model
 from pydantic.fields import FieldInfo
@@ -62,6 +73,12 @@ UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 
 # QuerySpec, or anything parse_filters accepts: {"price__gte": 10}, [{"field": ...}], JSON text
 Selection = QuerySpec | Mapping[str, Any] | Sequence[Any] | str | None
+
+
+def _chunks(values: list[Any], size: int = 10_000) -> Iterator[list[Any]]:
+    """PostgreSQL accepts at most 65535 parameters per statement: split big IN (...) lists."""
+    for start in range(0, len(values), size):
+        yield values[start : start + size]
 
 
 # ===================================================================== import
@@ -219,6 +236,10 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     # Empty -> every text column of the model.
     search_fields: ClassVar[Sequence[str]] = ()
     default_sort: ClassVar[Sequence[str]] = ("-id",)
+    # Rows fetched per round-trip when exporting (server-side cursor, constant memory)
+    export_batch_size: ClassVar[int] = 1000
+    # Rows inserted/updated per flush when importing
+    import_batch_size: ClassVar[int] = 1000
 
     def __init__(self, db: DbSession) -> None:
         self.db = db
@@ -312,19 +333,19 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     def create(
         self, data: CreateSchemaType | Mapping[str, Any], *, commit: bool = True
     ) -> ModelType:
-        values = self.before_create(self._to_dict(data, exclude_unset=False))
-        obj = self.model(**values)
-        self.db.add(obj)
-        self._save(obj, commit)
+        obj = self._new(data)
+        self._save(commit)
         self.after_create(obj)
         return obj
 
     def create_many(
         self, items: Sequence[CreateSchemaType | Mapping[str, Any]], *, commit: bool = True
     ) -> list[ModelType]:
-        objects = [self.create(item, commit=False) for item in items]
-        if commit:
-            self.db.commit()
+        """One batched INSERT; after_create runs once the rows have their ids."""
+        objects = [self._new(item) for item in items]
+        self._save(commit)
+        for obj in objects:
+            self.after_create(obj)
         return objects
 
     def update(
@@ -336,13 +357,8 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         commit: bool = True,
     ) -> ModelType:
         """partial=True (PATCH): only fields present are written. False (PUT): every field."""
-        values = self.before_update(obj, self._to_dict(data, exclude_unset=partial))
-        attributes = sa_inspect(self.model).attrs
-        for key, value in values.items():
-            if key not in attributes:
-                raise ValueError(f"{self.model.__name__} has no attribute '{key}'")
-            setattr(obj, key, value)
-        self._save(obj, commit)
+        self._apply(obj, data, partial=partial)
+        self._save(commit)
         self.after_update(obj)
         return obj
 
@@ -368,9 +384,10 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         ids = [row.pop("id") for row in rows]
         objects = {obj.id: obj for obj in self.get_many(ids, require_all=True)}
         for obj_id, values in zip(ids, rows, strict=True):
-            self.update(objects[obj_id], values, partial=partial, commit=False)
-        if commit:
-            self.db.commit()
+            self._apply(objects[obj_id], values, partial=partial)
+        self._save(commit)
+        for obj_id in ids:
+            self.after_update(objects[obj_id])
         return [objects[obj_id] for obj_id in ids]
 
     def update_all(
@@ -385,9 +402,10 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         values = self._to_dict(data, exclude_unset=partial)
         objects = self.get_list(selection)
         for obj in objects:
-            self.update(obj, dict(values), partial=partial, commit=False)
-        if commit:
-            self.db.commit()
+            self._apply(obj, dict(values), partial=partial)
+        self._save(commit)
+        for obj in objects:
+            self.after_update(obj)
         return len(objects)
 
     def delete(self, obj: ModelType, *, hard: bool = False, commit: bool = True) -> None:
@@ -395,12 +413,9 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         self.before_delete(obj)
         if self.soft_delete_enabled() and not hard:
             obj.deleted_at = func.now()
-            self._save(obj, commit)
         else:
             self.db.delete(obj)
-            self.db.flush()
-            if commit:
-                self.db.commit()
+        self._save(commit)
         self.after_delete(obj)
 
     def delete_by_id(self, id: Any, *, hard: bool = False, commit: bool = True) -> None:
@@ -444,44 +459,40 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             return [self._plain(item) for item in value]
         return self._plain(value)
 
-    def export_rows(
-        self, selection: Selection, fields: Sequence[str], limit: int | None = None
-    ) -> Iterator[list[Any]]:
-        # Validate before the workbook starts streaming (errors -> clean 400)
-        for path in fields:
-            validate_field_path(self.model, path)
-        stmt = self.build_query(selection).options(*loader_options(self.model, fields))
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        return ([self.export_value(obj, path) for path in fields] for obj in self.db.scalars(stmt))
-
-    def export_excel(
+    def export_data(
         self,
         selection: Selection = None,
         fields: Sequence[str] | None = None,
-        limit: int | None = settings.EXPORT_MAX_ROWS,
-    ) -> bytes:
+        limit: int | None = None,
+    ) -> tuple[list[str], Iterator[list[Any]]]:
+        """(headers, rows). Rows are read lazily with a server-side cursor (constant memory).
+        limit None/0 = every matching row."""
         fields = list(fields or self.export_fields())
-        return excel.build_data_workbook(fields, self.export_rows(selection, fields, limit))
+        # Validate before streaming starts (errors -> clean 400)
+        for path in fields:
+            validate_field_path(self.model, path)
+        stmt = self.build_query(selection).options(*loader_options(self.model, fields))
+        rows = (
+            [self.export_value(obj, path) for path in fields] for obj in self._stream(stmt, limit)
+        )
+        return fields, rows
 
-    def export_importable(
+    def export_importable_data(
         self,
         selection: Selection = None,
         *,
         schema: type[BaseModel],
         key: str = "id",
-        limit: int | None = settings.EXPORT_MAX_ROWS,
-    ) -> bytes:
+        limit: int | None = None,
+    ) -> tuple[list[str], Iterator[list[Any]]]:
         """Same columns as the import template: edit the file and import it back (update/upsert)."""
         fields = ImportContext(ImportMode.UPSERT, schema, key).field_names
         stmt = self.build_query(selection)
-        if limit is not None:
-            stmt = stmt.limit(limit)
         rows = (
             [self.import_export_value(obj, name) for name in fields]
-            for obj in self.db.scalars(stmt)
+            for obj in self._stream(stmt, limit)
         )
-        return excel.build_data_workbook(fields, rows)
+        return fields, rows
 
     def import_export_value(self, obj: ModelType, name: str) -> Any:
         """Cell of export_importable. Override for import columns that are not model attributes."""
@@ -518,17 +529,17 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
     def import_excel(
         self,
-        content: bytes,
+        source: bytes | BinaryIO,
         *,
         schema: type[BaseModel],
         mode: ImportMode = ImportMode.INSERT,
         key: str = "id",
         dry_run: bool = False,
-        max_rows: int = settings.IMPORT_MAX_ROWS,
+        max_rows: int | None = settings.IMPORT_MAX_ROWS,
     ) -> ImportResult:
         """Receive -> validate -> save. Nothing is written if any row is invalid."""
         ctx = ImportContext(mode=mode, schema=schema, key=key, dry_run=dry_run)
-        rows = self.import_read(content, ctx, max_rows)
+        rows = self.import_read(source, ctx, max_rows)
         self.import_validate(rows, ctx)
         result = ImportResult(
             mode=mode,
@@ -543,9 +554,11 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         return self.import_save(rows, ctx, result)
 
     # ----------------------------------------------------- step 1: receive
-    def import_read(self, content: bytes, ctx: ImportContext, max_rows: int) -> list[ImportRow]:
+    def import_read(
+        self, source: bytes | BinaryIO, ctx: ImportContext, max_rows: int | None
+    ) -> list[ImportRow]:
         """Parse the sheet, map headers to fields (name, alias or title), transform each row."""
-        header, data = excel.read_data_sheet(content, max_rows)
+        header, data = excel.read_data_sheet(source, max_rows)
         lookup = {}
         for name in ctx.field_names:
             lookup[name.lower()] = name
@@ -640,9 +653,13 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
                 for row in duplicated:
                     row.add_error(ctx, name, f"Duplicate value in file (rows {numbers})")
             column = getattr(self.model, name)
-            existing = dict(
-                self.db.execute(select(column, self.model.id).where(column.in_(list(owners)))).all()
-            )
+            existing = {
+                value: obj_id
+                for chunk in _chunks(list(owners))
+                for value, obj_id in self.db.execute(
+                    select(column, self.model.id).where(column.in_(chunk))
+                )
+            }
             for value, group in owners.items():
                 if value in existing and len(group) == 1:
                     row = group[0]
@@ -653,21 +670,37 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     def import_save(
         self, rows: list[ImportRow], ctx: ImportContext, result: ImportResult
     ) -> ImportResult:
-        """Write every row in one transaction."""
+        """Write every row in one transaction, flushed in batches of import_batch_size.
+        after_create / after_update run after each batch flush (records have their ids)."""
+        pending: list[tuple[ModelType, bool]] = []
         for row in rows:
-            if self.import_save_row(row, ctx) == "inserted":
+            created = row.target is None
+            pending.append((self.import_save_row(row, ctx), created))
+            if created:
                 result.inserted += 1
             else:
                 result.updated += 1
+            if len(pending) >= self.import_batch_size:
+                self._flush_import_batch(pending)
+        self._flush_import_batch(pending)
         self.db.commit()
         return result
 
-    def import_save_row(self, row: ImportRow, ctx: ImportContext) -> Literal["inserted", "updated"]:
+    def import_save_row(self, row: ImportRow, ctx: ImportContext) -> ModelType:
+        """Add (row.target is None) or modify the record of one row, without flushing."""
         if row.target is None:
-            self.create(row.data, commit=False)
-            return "inserted"
-        self.update(row.target, row.data, partial=True, commit=False)
-        return "updated"
+            return self._new(row.data)
+        self._apply(row.target, row.data, partial=True)
+        return row.target
+
+    def _flush_import_batch(self, pending: list[tuple[ModelType, bool]]) -> None:
+        self.db.flush()
+        for obj, created in pending:
+            if created:
+                self.after_create(obj)
+            else:
+                self.after_update(obj)
+        pending.clear()
 
     # ============================================================ internals
     @staticmethod
@@ -676,12 +709,31 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             return data.model_dump(exclude_unset=exclude_unset)
         return dict(data)
 
-    def _save(self, obj: ModelType, commit: bool) -> None:
+    def _stream(self, stmt: Select, limit: int | None) -> Iterator[ModelType]:
+        if limit:
+            stmt = stmt.limit(limit)
+        return iter(self.db.scalars(stmt.execution_options(yield_per=self.export_batch_size)))
+
+    def _new(self, data: BaseModel | Mapping[str, Any]) -> ModelType:
+        """before_create + add to the session (not flushed yet)."""
+        obj = self.model(**self.before_create(self._to_dict(data, exclude_unset=False)))
+        self.db.add(obj)
+        return obj
+
+    def _apply(self, obj: ModelType, data: BaseModel | Mapping[str, Any], *, partial: bool) -> None:
+        """before_update + set the attributes (not flushed yet)."""
+        values = self.before_update(obj, self._to_dict(data, exclude_unset=partial))
+        attributes = sa_inspect(self.model).attrs
+        for key, value in values.items():
+            if key not in attributes:
+                raise ValueError(f"{self.model.__name__} has no attribute '{key}'")
+            setattr(obj, key, value)
+
+    def _save(self, commit: bool) -> None:
+        # Server values (id, created_at, updated_at) come back with RETURNING (eager_defaults)
         self.db.flush()
         if commit:
             self.db.commit()
-        # Load server-generated values (id, created_at, updated_at, ...)
-        self.db.refresh(obj)
 
     def _delete_objects(self, objects: Sequence[ModelType], *, hard: bool, commit: bool) -> int:
         for obj in objects:
@@ -735,6 +787,7 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             return {}
         found = {
             getattr(obj, ctx.key): obj
-            for obj in self.db.scalars(self.get_query().where(column.in_(set(keys.values()))))
+            for chunk in _chunks(list(set(keys.values())))
+            for obj in self.db.scalars(self.get_query().where(column.in_(chunk)))
         }
         return {number: found[value] for number, value in keys.items() if value in found}

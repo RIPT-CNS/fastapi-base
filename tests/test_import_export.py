@@ -243,7 +243,7 @@ def test_bad_uploads(client, user_headers, monkeypatch):
         "Too many rows: the limit is 1",
     )
 
-    monkeypatch.setattr(ItemAPI, "import_max_file_size_mb", 0)
+    monkeypatch.setattr(ItemAPI, "import_max_file_size_mb", 0.001)  # ~1 KB
     assert upload(client, path, content, headers=user_headers).status_code == 413
 
 
@@ -261,3 +261,33 @@ def test_nothing_saved_when_save_fails(client, user_headers, monkeypatch):
         upload(client, f"{URL}/import", content, headers=user_headers)
     with SessionLocal() as db:
         assert db.query(Item).count() == 0
+
+
+def test_export_csv_stream(client, user_headers, items):
+    client.post(URL, json={"name": "=1+2", "tags": ["x"]}, headers=user_headers)
+    response = client.get(
+        f"{URL}/export", params={"format": "csv", "fields": "name,category.name,tags", "sort": "id"}
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/csv; charset=utf-8"
+    assert response.headers["content-disposition"].endswith('.csv"')
+    text = response.content.decode("utf-8")
+    assert text.startswith("\ufeffname,category.name,tags\r\n")
+    lines = text.splitlines()[1:]
+    assert lines[0] == 'Apple,fruit,"[""red"", ""sweet""]"'
+    assert lines[-1] == '\'=1+2,,"[""x""]"'  # formula neutralised
+
+
+def test_export_xlsx_splits_sheets_and_cleans_temp_file(client, items, monkeypatch, tmp_path):
+    import tempfile
+
+    from app.utils import excel
+
+    monkeypatch.setattr(excel, "SHEET_MAX_ROWS", 3)  # header + 2 rows per sheet
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    response = client.get(f"{URL}/export", params={"fields": "name", "sort": "id"})
+    workbook = load_workbook(io.BytesIO(response.content))
+    assert workbook.sheetnames == ["data", "data_2"]
+    assert [r[0] for r in workbook["data"].values] == ["name", "Apple", "Banana"]
+    assert [r[0] for r in workbook["data_2"].values] == ["name", "Carrot", "100% Juice"]
+    assert list(tmp_path.iterdir()) == []  # temp file removed after sending

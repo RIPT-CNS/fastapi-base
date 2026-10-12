@@ -54,9 +54,11 @@ class Settings(BaseSettings):
     PAGE_SIZE_MAX: int = 100
     # Max rows returned by GET /list and GET /many
     LIST_MAX_ROWS: int = 1000
-    EXPORT_MAX_ROWS: int = 50_000
-    IMPORT_MAX_ROWS: int = 5_000
-    IMPORT_MAX_FILE_SIZE_MB: int = 10
+    # 0 = no limit. Exports are streamed: memory stays flat whatever the size
+    EXPORT_MAX_ROWS: int = 0
+    # Rows of one import (all are validated in memory before writing). 0 = no limit
+    IMPORT_MAX_ROWS: int = 100_000
+    IMPORT_MAX_FILE_SIZE_MB: int = 100
 
     # ----------------------------------------------------- Local auth (JWT)
     SECRET_KEY: str = INSECURE_SECRET_KEY

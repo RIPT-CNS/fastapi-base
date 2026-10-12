@@ -46,6 +46,8 @@ class BareBaseModel(TimestampMixin, Base):
     """
 
     __abstract__ = True
+    # INSERT/UPDATE ... RETURNING server values (created_at, updated_at): no extra SELECT
+    __mapper_args__ = {"eager_defaults": True}
     # Columns that can never be filtered, searched, sorted or exported through BaseAPI
     __hidden_fields__ = frozenset()
 

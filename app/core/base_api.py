@@ -30,7 +30,7 @@ Routes (key: method path)                              group
     import_template:   GET    /import/template         import
     import_validate:   POST   /import/validate         import   (dry run, returns row errors)
     import_data:       POST   /import?mode=insert|update|upsert   import
-    export:            GET    /export?fields=a,b.c     export
+    export:            GET    /export?fields=a,b.c&format=xlsx|csv   export
     export_importable: GET    /export/importable       export   (re-importable format)
 
 Every read/export/bulk route accepts the dynamic query of app.utils.query_builder:
@@ -48,7 +48,7 @@ Access control, resolved per route (route key first, then its group):
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Any, ClassVar
+from typing import Annotated, Any, BinaryIO, ClassVar, Literal
 
 from fastapi import APIRouter, Body, Depends, File, Query, Request, UploadFile, status
 from fastapi.responses import Response
@@ -59,7 +59,13 @@ from app.core.config import settings
 from app.schemas.sche_base import BulkResult, ImportMode, ImportResult, PaginationParams
 from app.schemas.sche_response import BaseResponse, DataResponse, PageResponse
 from app.services.srv_base import BaseService
-from app.utils.excel import XLSX_MEDIA_TYPE, xlsx_response
+from app.utils.excel import (
+    CSV_MEDIA_TYPE,
+    XLSX_MEDIA_TYPE,
+    csv_streaming_response,
+    xlsx_file_response,
+    xlsx_response,
+)
 from app.utils.exception_handler import CustomException, ExceptionType
 from app.utils.login_manager import PermissionRequired, RoleRequired, get_current_user
 from app.utils.query_builder import (
@@ -101,10 +107,13 @@ ROUTE_GROUPS = {key: group for key, _, _, group in ROUTES}
 # Query params that are not shorthand filters
 RESERVED_PARAMS = frozenset(
     {"filters", "search", "search_fields", "sort", "page", "page_size", "ids", "fields",
-     "confirm", "mode"}
+     "confirm", "mode", "format"}
 )  # fmt: skip
 
 _XLSX_RESPONSE = {200: {"content": {XLSX_MEDIA_TYPE: {}}, "description": "Excel file"}}
+_EXPORT_RESPONSE = {
+    200: {"content": {XLSX_MEDIA_TYPE: {}, CSV_MEDIA_TYPE: {}}, "description": "Excel or CSV file"}
+}
 
 
 @dataclass(frozen=True)
@@ -189,7 +198,7 @@ class BaseAPI:
     permission_prefix: ClassVar[str | None] = None
     route_config: ClassVar[Mapping[str, RouteConfig]] = {}
 
-    # --------------------------------------------------------------- limits
+    # ------------------------------------------- limits (0 = no limit, from .env)
     list_limit: ClassVar[int] = settings.LIST_MAX_ROWS
     export_limit: ClassVar[int] = settings.EXPORT_MAX_ROWS
     import_max_rows: ClassVar[int] = settings.IMPORT_MAX_ROWS
@@ -293,20 +302,22 @@ class BaseAPI:
                 "No filter/search given: add ?confirm=true to apply to ALL records",
             )
 
-    def _read_upload(self, file: UploadFile) -> bytes:
-        limit = self.import_max_file_size_mb * 1024 * 1024
-        content = file.file.read(limit + 1)
-        if len(content) > limit:
-            raise CustomException(
-                http_code=413, message=f"File too large: max {self.import_max_file_size_mb} MB"
-            )
-        if not content:
+    def _read_upload(self, file: UploadFile) -> BinaryIO:
+        """The uploaded file stays on disk (spooled by Starlette): only its size is checked."""
+        size = file.size
+        if size is None:
+            size = file.file.seek(0, 2)
+        file.file.seek(0)
+        limit_mb = self.import_max_file_size_mb
+        if limit_mb and size > limit_mb * 1024 * 1024:
+            raise CustomException(http_code=413, message=f"File too large: max {limit_mb} MB")
+        if not size:
             raise CustomException(ExceptionType.BAD_REQUEST, "Empty file")
-        return content
+        return file.file
 
-    def _filename(self, suffix: str = "") -> str:
+    def _filename(self, suffix: str = "", extension: str = "xlsx") -> str:
         table = self.service.model.__tablename__
-        return f"{table}{suffix}_{datetime.now(UTC):%Y%m%d_%H%M%S}.xlsx"
+        return f"{table}{suffix}_{datetime.now(UTC):%Y%m%d_%H%M%S}.{extension}"
 
     # ================================================================= read
     def _count(self) -> tuple[Callable, dict]:
@@ -536,14 +547,24 @@ class BaseAPI:
                     "To-many relations are exported as a JSON array. Default: every column"
                 ),
             ] = None,
+            file_format: Annotated[
+                Literal["xlsx", "csv"],
+                Query(
+                    alias="format",
+                    description="xlsx: built on disk then streamed. csv: streamed while rows are "
+                    "read (first bytes immediately, best for very large exports)",
+                ),
+            ] = "xlsx",
         ) -> Response:
-            content = service.export_excel(spec, split_csv(fields), limit=self.export_limit)
-            return xlsx_response(content, self._filename())
+            headers, rows = service.export_data(spec, split_csv(fields), limit=self.export_limit)
+            if file_format == "csv":
+                return csv_streaming_response(headers, rows, self._filename(extension="csv"))
+            return xlsx_file_response(headers, rows, self._filename())
 
         return export, {
             "response_class": Response,
-            "responses": _XLSX_RESPONSE,
-            "summary": f"Export {self.model_name} to Excel",
+            "responses": _EXPORT_RESPONSE,
+            "summary": f"Export {self.model_name} to Excel / CSV",
         }
 
     def _export_importable(self) -> tuple[Callable, dict]:
@@ -552,10 +573,10 @@ class BaseAPI:
         def export_importable(
             spec: QuerySpecDep, service: Annotated[service_cls, Depends()]
         ) -> Response:
-            content = service.export_importable(
+            headers, rows = service.export_importable_data(
                 spec, schema=self.import_model, key=self.import_key, limit=self.export_limit
             )
-            return xlsx_response(content, self._filename("_import"))
+            return xlsx_file_response(headers, rows, self._filename("_import"))
 
         return export_importable, {
             "response_class": Response,
